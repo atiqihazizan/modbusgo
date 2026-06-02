@@ -9,6 +9,7 @@ import '../../core/services/location_service.dart';
 import '../../core/services/mqtt_service.dart';
 import './widgets/modbus_device_panel_widget.dart';
 import './widgets/unified_dashboard_card_widget.dart';
+import '../../core/services/registration_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -67,6 +68,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _loadDeviceInfo() async {
     final storage = LocalStorageService();
+
+    // Sync terkini dari backend dulu — pastikan agency_code/name tak hilang.
+    // Senyap; kalau gagal (offline), guna nilai storage sedia ada.
+    try {
+      await RegistrationService().restoreFromBackend();
+    } catch (_) {}
+
     final info = await storage.getDeviceInfo();
     final agencyName = await storage.getAgencyName();
     final agencyCode = await storage.getAgencyCode();
