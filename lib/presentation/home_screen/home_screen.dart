@@ -241,7 +241,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   const ModbusDevicePanelWidget(),
                   const SizedBox(height: 12),
                   // Modbus Settings — configure slave ID, address, length, type, etc.
-                  const ModbusSettingsWidget(),
                   const SizedBox(height: 20),
                   HomeActionBarWidget(
                     isEmitting: _isEmitting,
