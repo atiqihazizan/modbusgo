@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../core/app_export.dart';
+import '../../core/services/device_identity_service.dart';
+import '../../core/services/mqtt_service.dart';
+import '../../routes/app_routes.dart';
+import '../../theme/app_theme.dart';
+import '../../widgets/custom_icon_widget.dart';
 import './widgets/agency_header_bar_widget.dart';
 import './widgets/device_info_card_widget.dart';
 import './widgets/home_action_bar_widget.dart';
@@ -58,8 +63,34 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _onManualEmit() async {
     setState(() => _isEmitting = true);
-    // TODO: connect real logic — trigger manual tracking emit
-    await Future.delayed(const Duration(seconds: 1));
+
+    final mqtt = MqttService();
+
+    // Pastikan connected (init sekali — guna device_id sebenar).
+    if (!mqtt.isConnected) {
+      final deviceId = await DeviceIdentityService().getDeviceId();
+      if (deviceId.isEmpty) {
+        if (mounted) {
+          setState(() => _isEmitting = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Device ID tiada — provision dulu')),
+          );
+        }
+        return;
+      }
+      await mqtt.init(deviceId: deviceId);
+      await Future.delayed(const Duration(seconds: 2)); // beri masa connect
+    }
+
+    // NILAI TEST TETAP — GPS sebenar belum ada (akan datang kemudian).
+    mqtt.publishBundle({
+      'data_type': 'MG',
+      'latitude': 3.1390,
+      'longitude': 101.6869,
+      'speed': 0,
+      'sensor_data': [-1],
+    });
+
     if (mounted) {
       setState(() {
         _isEmitting = false;
@@ -67,18 +98,12 @@ class _HomeScreenState extends State<HomeScreen> {
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Row(
-            children: [
-              CustomIconWidget(
-                iconName: 'check_circle',
-                color: Colors.white,
-                size: 18,
-              ),
-              const SizedBox(width: 10),
-              const Text('Tracking data emitted successfully'),
-            ],
+          content: Text(
+            mqtt.isConnected
+                ? 'Tracking data emitted'
+                : 'Offline — data queued',
           ),
-          backgroundColor: AppTheme.success,
+          backgroundColor: mqtt.isConnected ? AppTheme.success : Colors.orange,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
