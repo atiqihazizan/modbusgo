@@ -235,30 +235,38 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: theme.colorScheme.surface,
         elevation: 0,
         scrolledUnderElevation: 2,
-        title: Row(
-          children: [
-            // GO logo — transparent background
-            // SizedBox(width: 36, height: 36, child: SizedBox()),
-            // const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _deviceName.toUpperCase(),
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                Text(
-                  _deviceId,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          ],
+        title: Text(
+          _deviceName.toUpperCase(),
+          overflow: TextOverflow.ellipsis, // Menambah '...' jika teks terlalu panjang
+          maxLines: 1, // Memaksa teks sentiasa dalam 1 baris
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
         ),
+        // title: Row(
+        //   children: [
+        //     // GO logo — transparent background
+        //     // SizedBox(width: 36, height: 36, child: SizedBox()),
+        //     // const SizedBox(width: 10),
+        //     Column(
+        //       crossAxisAlignment: CrossAxisAlignment.start,
+        //       children: [
+        //         Text(
+        //           _deviceName.toUpperCase(),
+        //           style: theme.textTheme.titleLarge?.copyWith(
+        //             fontWeight: FontWeight.w700,
+        //           ),
+        //         ),
+        //         Text(
+        //           _deviceId,
+        //           style: theme.textTheme.labelSmall?.copyWith(
+        //             color: theme.colorScheme.onSurfaceVariant,
+        //           ),
+        //         ),
+        //       ],
+        //     ),
+        //   ],
+        // ),
         actions: [
           IconButton(
             onPressed: () => context.push(AppRoutes.qrScannerScreen),

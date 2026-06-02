@@ -104,7 +104,7 @@ class _AgencyRow extends StatelessWidget {
             child: Text(
               agencyName.isNotEmpty ? agencyName : '—',
               style: theme.textTheme.titleMedium?.copyWith(
-                fontSize: 17,
+                fontSize: 14,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 0.3,
                 color: theme.colorScheme.onSurface,
