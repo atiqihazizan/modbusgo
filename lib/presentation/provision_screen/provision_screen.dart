@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../core/app_export.dart';
+import '../../core/services/device_identity_service.dart';
+import '../../core/services/location_service.dart';
+import '../../core/services/mqtt_service.dart';
 import '../../core/services/provisioning_service.dart';
 import '../../core/services/registration_service.dart';
 
@@ -63,6 +66,22 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
       return;
     }
 
+    // WAJIB: dapatkan GPS fix sebelum daftar. Gagal = batal provisioning.
+    final fix = await LocationService().getCurrentFix();
+    if (fix == null) {
+      if (!mounted) return;
+      setState(() => _isProcessing = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'GPS tidak tersedia. Provisioning dibatalkan. '
+            'Sila hidupkan GPS & benarkan lokasi, kemudian cuba lagi.',
+          ),
+        ),
+      );
+      return;
+    }
+
     final regResult = await RegistrationService().registerDevice(
       name: deviceName.trim(),
     );
@@ -71,6 +90,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
     setState(() => _isProcessing = false);
 
     if (regResult.success) {
+      await _emitInitialLocation(fix);
       if (regResult.needApproval) {
         context.go(AppRoutes.pendingScreen);
       } else {
@@ -82,6 +102,29 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
           content: Text('Device registration failed. Please try again.'),
         ),
       );
+    }
+  }
+
+  /// Hantar satu bundle lat/lon SEBENAR selepas provisioning berjaya.
+  Future<void> _emitInitialLocation(LocationFix fix) async {
+    try {
+      final mqtt = MqttService();
+      if (!mqtt.isConnected) {
+        final deviceId = await DeviceIdentityService().getDeviceId();
+        if (deviceId.isEmpty) return;
+        await mqtt.init(deviceId: deviceId);
+        await Future.delayed(const Duration(seconds: 2));
+      }
+      mqtt.publishBundle({
+        'data_type': 'MG',
+        'latitude': fix.latitude,
+        'longitude': fix.longitude,
+        'speed': fix.speed,
+        if (fix.heading != null) 'heading': fix.heading,
+        'sensor_data': [-1],
+      });
+    } catch (_) {
+      // Senyap — jangan halang aliran.
     }
   }
 

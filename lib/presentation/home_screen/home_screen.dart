@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/app_export.dart';
 import '../../core/services/device_identity_service.dart';
+import '../../core/services/location_service.dart';
 import '../../core/services/mqtt_service.dart';
 import './widgets/agency_header_bar_widget.dart';
 import './widgets/device_info_card_widget.dart';
@@ -34,6 +35,13 @@ class _HomeScreenState extends State<HomeScreen> {
   String _lastEmit = _MockHomeState.lastEmit;
   bool _isRefreshing = false;
   bool _isEmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Mula GPS di latar — tak block UI. Fix akan masuk bila sedia.
+    LocationService().start();
+  }
 
   Future<void> _onRefresh() async {
     setState(() => _isRefreshing = true);
@@ -78,12 +86,14 @@ class _HomeScreenState extends State<HomeScreen> {
       await Future.delayed(const Duration(seconds: 2)); // beri masa connect
     }
 
-    // NILAI TEST TETAP — GPS sebenar belum ada (akan datang kemudian).
+    // Guna fix GPS sebenar kalau ada; kalau belum sedia, guna last/abai.
+    final fix = LocationService().lastFix;
     mqtt.publishBundle({
       'data_type': 'MG',
-      'latitude': 3.1390,
-      'longitude': 101.6869,
-      'speed': 0,
+      'latitude': fix?.latitude ?? 3.1390,
+      'longitude': fix?.longitude ?? 101.6869,
+      'speed': fix?.speed ?? 0,
+      if (fix?.heading != null) 'heading': fix!.heading,
       'sensor_data': [-1],
     });
 
