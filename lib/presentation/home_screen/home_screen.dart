@@ -7,11 +7,9 @@ import '../../core/services/device_identity_service.dart';
 import '../../core/services/local_storage_service.dart';
 import '../../core/services/location_service.dart';
 import '../../core/services/mqtt_service.dart';
-import './widgets/agency_header_bar_widget.dart';
-import './widgets/device_info_card_widget.dart';
 import './widgets/home_action_bar_widget.dart';
 import './widgets/modbus_device_panel_widget.dart';
-import './widgets/tracking_status_bar_widget.dart';
+import './widgets/unified_dashboard_card_widget.dart';
 
 // Mock data — TODO: Replace with [Riverpod/Bloc] for production
 // class _MockHomeState {
@@ -70,14 +68,16 @@ class _HomeScreenState extends State<HomeScreen> {
     final agencyCode = await storage.getAgencyCode();
     if (!mounted) return;
     setState(() {
-      _deviceName =
-          (info?['name']?.isNotEmpty == true) ? info!['name']! : '—';
-      _deviceId =
-          (info?['device_id']?.isNotEmpty == true) ? info!['device_id']! : '—';
-      _agencyName =
-          (agencyName != null && agencyName.isNotEmpty) ? agencyName : '—';
-      _agencyCode =
-          (agencyCode != null && agencyCode.isNotEmpty) ? agencyCode : '—';
+      _deviceName = (info?['name']?.isNotEmpty == true) ? info!['name']! : '—';
+      _deviceId = (info?['device_id']?.isNotEmpty == true)
+          ? info!['device_id']!
+          : '—';
+      _agencyName = (agencyName != null && agencyName.isNotEmpty)
+          ? agencyName
+          : '—';
+      _agencyCode = (agencyCode != null && agencyCode.isNotEmpty)
+          ? agencyCode
+          : '—';
     });
   }
 
@@ -125,7 +125,9 @@ class _HomeScreenState extends State<HomeScreen> {
         SnackBar(
           content: const Text('Status dikemas kini'),
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
           duration: const Duration(seconds: 2),
         ),
       );
@@ -204,7 +206,9 @@ class _HomeScreenState extends State<HomeScreen> {
         SnackBar(
           content: const Text('GPS dikemas kini'),
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
           duration: const Duration(seconds: 2),
         ),
       );
@@ -304,21 +308,14 @@ class _HomeScreenState extends State<HomeScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
                 children: [
-                  DeviceInfoCardWidget(
+                  UnifiedDashboardCardWidget(
                     deviceId: _deviceId,
                     agencyCode: _agencyCode,
                     coordinates: _coordinates,
-                  ),
-                  const SizedBox(height: 12),
-                  AgencyHeaderBarWidget(
                     agencyName: _agencyName,
-                    agencyCode: _agencyCode,
                     onRefreshGps: _onRefreshGps,
                     onManualEmit: _onManualEmit,
                     isEmitting: _isEmitting,
-                  ),
-                  const SizedBox(height: 12),
-                  TrackingStatusBarWidget(
                     isOnline: _isOnline,
                     isMoving: _isMoving,
                     lastEmit: _lastEmit,
