@@ -57,12 +57,10 @@ class _SplashLogoWidgetState extends State<SplashLogoWidget>
         children: [
           // Transparent background — GO logo
           SizedBox(
-            width: 160,
-            height: 160,
+            width: 200,
+            height: 200,
             child: Image.asset(
-              'assets/images/GO-1780310152509.png',
               fit: BoxFit.contain,
-              semanticLabel: 'ModbusGo splash logo',
               errorBuilder: (context, error, stackTrace) => Center(
                 child: CustomIconWidget(
                   iconName: 'memory',
@@ -70,17 +68,11 @@ class _SplashLogoWidgetState extends State<SplashLogoWidget>
                   size: 72,
                 ),
               ),
+              "assets/images/GO-1780372541638.png",
             ),
           ),
           const SizedBox(height: 20),
-          Text(
-            'ModbusGo',
-            style: theme.textTheme.displaySmall?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: theme.colorScheme.onSurface,
-              letterSpacing: -0.5,
-            ),
-          ),
+          SizedBox(),
           const SizedBox(height: 6),
           Text(
             'Device Management & GPS Tracking',

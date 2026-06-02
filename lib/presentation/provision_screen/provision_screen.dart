@@ -127,10 +127,9 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
               children: [
                 const Spacer(flex: 2),
                 Image.asset(
-                  'assets/images/app_icon-1780309918034.png',
-                  width: 90,
-                  height: 90,
-                  semanticLabel: 'ModbusGo app logo',
+                  width: 100,
+                  height: 100,
+                  "assets/images/app_icon-1780309918034-removebg-preview-1780371800429.png",
                 ),
                 const SizedBox(height: 24),
                 Container(

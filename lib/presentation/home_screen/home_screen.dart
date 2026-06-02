@@ -3,14 +3,10 @@ import 'package:flutter/material.dart';
 import '../../core/app_export.dart';
 import '../../core/services/device_identity_service.dart';
 import '../../core/services/mqtt_service.dart';
-import '../../routes/app_routes.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/custom_icon_widget.dart';
 import './widgets/agency_header_bar_widget.dart';
 import './widgets/device_info_card_widget.dart';
 import './widgets/home_action_bar_widget.dart';
 import './widgets/modbus_device_panel_widget.dart';
-import './widgets/modbus_settings_widget.dart';
 import './widgets/tracking_status_bar_widget.dart';
 
 // Mock data — TODO: Replace with [Riverpod/Bloc] for production
@@ -150,9 +146,7 @@ class _HomeScreenState extends State<HomeScreen> {
               width: 36,
               height: 36,
               child: Image.asset(
-                'assets/images/GO-1780310152509.png',
                 fit: BoxFit.contain,
-                semanticLabel: 'ModbusGo logo',
                 errorBuilder: (_, __, ___) => Center(
                   child: CustomIconWidget(
                     iconName: 'memory',
@@ -160,6 +154,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     size: 20,
                   ),
                 ),
+                "assets/images/app_icon-1780309918034-removebg-preview-1780371862334.png",
               ),
             ),
             const SizedBox(width: 10),

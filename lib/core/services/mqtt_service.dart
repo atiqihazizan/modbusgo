@@ -7,8 +7,6 @@ import 'package:mqtt_client/mqtt_server_client.dart';
 
 import './mqtt_offline_queue.dart';
 import './mqtt_topics.dart';
-import 'mqtt_offline_queue.dart';
-import 'mqtt_topics.dart';
 
 // MqttService — singleton MQTT client untuk publish tracking data ke backend v3.
 //

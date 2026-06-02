@@ -16,7 +16,7 @@ class BootScreen extends StatefulWidget {
 class _BootScreenState extends State<BootScreen>
     with SingleTickerProviderStateMixin {
   final bool _isLoading = true;
-  String _statusMessage = 'Memulakan…';
+  String _statusMessage = 'Starting…';
 
   late AnimationController _bgController;
   late Animation<double> _bgAnimation;
@@ -46,7 +46,7 @@ class _BootScreenState extends State<BootScreen>
       await DeviceIdentityService().getDeviceId();
 
       if (!mounted) return;
-      setState(() => _statusMessage = 'Menyemak pendaftaran peranti…');
+      setState(() => _statusMessage = 'Checking device registration…');
 
       final storage = LocalStorageService();
       final hasDevice = await storage.hasDeviceInfo();
@@ -61,7 +61,7 @@ class _BootScreenState extends State<BootScreen>
         return;
       }
 
-      setState(() => _statusMessage = 'Memulihkan data peranti…');
+      setState(() => _statusMessage = 'Restoring device data…');
       final restored = await RegistrationService().restoreFromBackend();
 
       if (!mounted) return;
