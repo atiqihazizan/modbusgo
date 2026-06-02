@@ -35,6 +35,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   StreamSubscription<LocationFix>? _locSub;
 
+  // Auto-publish throttle — elak spam bila GPS hantar fix laju.
+  DateTime _lastAutoPublish = DateTime.fromMillisecondsSinceEpoch(0);
+  static const Duration _autoPublishMinGap = Duration(seconds: 3);
+
   @override
   void initState() {
     super.initState();
@@ -48,7 +52,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _locSub?.cancel();
-    // Lepaskan callback supaya tak tunjuk toast lepas screen tutup.
     final mqtt = MqttService();
     mqtt.onConnectionChanged = null;
     mqtt.onReconnectExhausted = null;
@@ -57,7 +60,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Bila app kembali foreground & MQTT dah exhausted → cuba reconnect.
     if (state == AppLifecycleState.resumed) {
       MqttService().resumeReconnect();
     }
@@ -86,7 +88,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _startMqtt() async {
     final mqtt = MqttService();
 
-    // Pasang callback — kemas status & toast bila reconnect habis.
     mqtt.onConnectionChanged = (connected) {
       if (!mounted) return;
       setState(() => _isOnline = connected);
@@ -112,7 +113,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
     };
 
-    // Init guna device_id sebenar.
     final deviceId = await DeviceIdentityService().getDeviceId();
     if (deviceId.isEmpty) return;
     await mqtt.init(deviceId: deviceId);
@@ -121,22 +121,48 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _startLocation() async {
-    // Start GPS in background — does not block UI.
     await LocationService().start();
 
-    // Listen for incoming fixes → update coordinates + motion status.
+    // Listen for incoming fixes → update UI + auto-publish.
     _locSub = LocationService().stream.listen((fix) {
       if (!mounted) return;
       setState(() {
         _coordinates = _fmtCoords(fix.latitude, fix.longitude);
         _isMoving = fix.speed > 0.5; // motion threshold (m/s)
       });
+      // WAJIB: setiap lat/lon berubah → terus publish (tak kira sensor).
+      _autoPublish(fix);
     });
 
     // Show initial fix if already available.
     final f = LocationService().lastFix;
     if (f != null && mounted) {
       setState(() => _coordinates = _fmtCoords(f.latitude, f.longitude));
+    }
+  }
+
+  /// Auto-publish bila lokasi berubah. Throttle ringan elak spam.
+  /// Sensor data tiada → guna placeholder [-1] (sama macam manual emit).
+  void _autoPublish(LocationFix fix) {
+    final now = DateTime.now();
+    if (now.difference(_lastAutoPublish) < _autoPublishMinGap) return;
+    _lastAutoPublish = now;
+
+    final mqtt = MqttService();
+    mqtt.publishBundle({
+      'data_type': 'MG',
+      'latitude': fix.latitude,
+      'longitude': fix.longitude,
+      'speed': fix.speed,
+      if (fix.heading != null) 'heading': fix.heading,
+      'sensor_data': [-1],
+    });
+
+    if (mounted) {
+      setState(() {
+        _isOnline = mqtt.isConnected;
+        _lastEmit = mqtt.isConnected ? 'Auto · just now' : 'Queued (offline)';
+      });
     }
   }
 
@@ -177,7 +203,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     final mqtt = MqttService();
 
-    // Ensure connected (init once — use real device_id).
     if (!mqtt.isConnected) {
       final deviceId = await DeviceIdentityService().getDeviceId();
       if (deviceId.isEmpty) {
@@ -192,10 +217,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return;
       }
       await mqtt.init(deviceId: deviceId);
-      await Future.delayed(const Duration(seconds: 2)); // allow time to connect
+      await Future.delayed(const Duration(seconds: 2));
     }
 
-    // Use real GPS fix if available.
     final fix = LocationService().lastFix;
     mqtt.publishBundle({
       'data_type': 'MG',
@@ -240,6 +264,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _coordinates = _fmtCoords(fix.latitude, fix.longitude);
         _isMoving = fix.speed > 0.5;
       });
+      // Refresh manual juga publish satu fix segar.
+      _lastAutoPublish = DateTime.fromMillisecondsSinceEpoch(0);
+      _autoPublish(fix);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('GPS updated'),

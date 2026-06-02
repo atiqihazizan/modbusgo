@@ -147,6 +147,19 @@ class LocalStorageService {
     return prefs.getBool(_kNeedApproval) ?? false;
   }
 
+  /// Clear data agency SAHAJA (untuk tukar agency / re-provision).
+  /// device_id (secure storage) & device info dikekalkan.
+  Future<void> clearAgencyData() async {
+    final prefs = await _getPrefs();
+    await Future.wait([
+      prefs.remove(_kAgencyToken),
+      prefs.remove(_kAgencyId),
+      prefs.remove(_kAgencyCode),
+      prefs.remove(_kAgencyName),
+      prefs.remove(_kNeedApproval),
+    ]);
+  }
+
   // --- Clear ---
 
   Future<void> clearAllData() async {
