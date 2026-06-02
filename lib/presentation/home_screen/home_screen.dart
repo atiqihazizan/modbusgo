@@ -10,18 +10,6 @@ import '../../core/services/mqtt_service.dart';
 import './widgets/modbus_device_panel_widget.dart';
 import './widgets/unified_dashboard_card_widget.dart';
 
-// Mock data — TODO: Replace with [Riverpod/Bloc] for production
-// class _MockHomeState {
-//   static const String deviceName = 'RTU-UNIT-04';
-//   static const String deviceId = 'MBG-2024-0047';
-//   static const String agencyName = 'Jabatan Pengairan Selangor';
-//   static const String agencyCode = 'JPS-SEL';
-//   static bool isOnline = true;
-//   static bool isMoving = false;
-//   static String lastEmit = '2 min ago';
-//   static String lastCoordinates = '3.1390° N, 101.6869° E';
-// }
-
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -29,7 +17,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // Data sebenar dari storage
   String _deviceName = '-';
   String _deviceId = '—';
@@ -50,14 +38,29 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadDeviceInfo();
     _startLocation();
+    _startMqtt(); // MQTT keep-online sejurus masuk home
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _locSub?.cancel();
+    // Lepaskan callback supaya tak tunjuk toast lepas screen tutup.
+    final mqtt = MqttService();
+    mqtt.onConnectionChanged = null;
+    mqtt.onReconnectExhausted = null;
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Bila app kembali foreground & MQTT dah exhausted → cuba reconnect.
+    if (state == AppLifecycleState.resumed) {
+      MqttService().resumeReconnect();
+    }
   }
 
   Future<void> _loadDeviceInfo() async {
@@ -78,6 +81,43 @@ class _HomeScreenState extends State<HomeScreen> {
           ? agencyCode
           : '—';
     });
+  }
+
+  Future<void> _startMqtt() async {
+    final mqtt = MqttService();
+
+    // Pasang callback — kemas status & toast bila reconnect habis.
+    mqtt.onConnectionChanged = (connected) {
+      if (!mounted) return;
+      setState(() => _isOnline = connected);
+    };
+    mqtt.onReconnectExhausted = () {
+      if (!mounted) return;
+      setState(() => _isOnline = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+            'MQTT gagal sambung selepas 5 percubaan. '
+            'Sila reconnect manual di skrin Profile.',
+          ),
+          backgroundColor: Colors.orange.shade800,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+            label: 'PROFILE',
+            textColor: Colors.white,
+            onPressed: () => context.push(AppRoutes.profileScreen),
+          ),
+        ),
+      );
+    };
+
+    // Init guna device_id sebenar.
+    final deviceId = await DeviceIdentityService().getDeviceId();
+    if (deviceId.isEmpty) return;
+    await mqtt.init(deviceId: deviceId);
+
+    if (mounted) setState(() => _isOnline = mqtt.isConnected);
   }
 
   Future<void> _startLocation() async {
@@ -102,10 +142,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _fmtCoords(double lat, double lon) {
     return '${lat.abs().toStringAsFixed(4)}, ${lon.abs().toStringAsFixed(4)}';
-    // final latDir = lat >= 0 ? 'N' : 'S';
-    // final lonDir = lon >= 0 ? 'E' : 'W';
-    // return '${lat.abs().toStringAsFixed(4)}° $latDir, '
-    //     '${lon.abs().toStringAsFixed(4)}° $lonDir';
   }
 
   Future<void> _onRefresh() async {
@@ -119,7 +155,10 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     }
     if (mounted) {
-      setState(() => _isRefreshing = false);
+      setState(() {
+        _isRefreshing = false;
+        _isOnline = MqttService().isConnected;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('Status updated'),
@@ -234,56 +273,15 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: theme.colorScheme.surface,
         elevation: 0,
         scrolledUnderElevation: 2,
-        // title: Text(
-        //   _deviceName.toUpperCase(),
-        //   overflow: TextOverflow.ellipsis, // Menambah '...' jika teks terlalu panjang
-        //   maxLines: 1, // Memaksa teks sentiasa dalam 1 baris
-        //   style: theme.textTheme.titleLarge?.copyWith(
-        //     fontWeight: FontWeight.w700,
-        //   ),
-        // ),
-        // title: Row(
-        //   children: [
-        //     // GO logo — transparent background
-        //     // SizedBox(width: 36, height: 36, child: SizedBox()),
-        //     // const SizedBox(width: 10),
-        //     Column(
-        //       crossAxisAlignment: CrossAxisAlignment.start,
-        //       children: [
-        //         Text(
-        //           _deviceName.toUpperCase(),
-        //           style: theme.textTheme.titleLarge?.copyWith(
-        //             fontWeight: FontWeight.w700,
-        //           ),
-        //         ),
-        //         Text(
-        //           _deviceId,
-        //           style: theme.textTheme.labelSmall?.copyWith(
-        //             color: theme.colorScheme.onSurfaceVariant,
-        //           ),
-        //         ),
-        //       ],
-        //     ),
-        //   ],
-        // ),
         actions: [
-          // IconButton(
-          //   onPressed: () => context.push(AppRoutes.qrScannerScreen),
-          //   icon: CustomIconWidget(
-          //     iconName: 'qr_code_scanner',
-          //     color: theme.colorScheme.onSurface,
-          //     size: 22,
-          //   ),
-          //   tooltip: 'Scan QR',
-          // ),
           IconButton(
-            onPressed: () => context.push(AppRoutes.settingsScreen),
+            onPressed: () => context.push(AppRoutes.profileScreen),
             icon: CustomIconWidget(
               iconName: 'account_circle',
               color: theme.colorScheme.onSurface,
               size: 22,
             ),
-            tooltip: 'Info',
+            tooltip: 'Profile',
           ),
           const SizedBox(width: 4),
         ],
@@ -314,25 +312,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     lastEmit: _lastEmit,
                   ),
                   const SizedBox(height: 12),
-                  // Modbus Device Panel — shows connected devices with WiFi/BT type and live values
                   const ModbusDevicePanelWidget(),
                   const SizedBox(height: 12),
-                  // Modbus Settings — configure slave ID, address, length, type, etc.
-                  // const SizedBox(height: 20),
-                  // HomeActionBarWidget(
-                  //   isEmitting: _isEmitting,
-                  //   onManualEmit: _onManualEmit,
-                  //   onViewLogs: () {
-                  //     // TODO: connect real logic — navigate to TrackingLogsScreen
-                  //     ScaffoldMessenger.of(context).showSnackBar(
-                  //       const SnackBar(
-                  //         content: Text('Logs screen — coming soon'),
-                  //         behavior: SnackBarBehavior.floating,
-                  //         duration: Duration(seconds: 1),
-                  //       ),
-                  //     );
-                  //   },
-                  // ),
                 ],
               ),
             ),

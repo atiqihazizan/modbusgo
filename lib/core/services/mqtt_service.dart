@@ -15,7 +15,13 @@ import './mqtt_topics.dart';
 // Topik   : LoRa/tracking/{device_id}/bundle | status | backfill ; subscribe /ack
 // Payload : node_id (= device_id) TANPA agency_token. Backend route guna device_id.
 //
-// Ketahanan: auto-reconnect (backoff 2→60s), offline queue→backfill, LWT.
+// Ketahanan:
+//   - Auto-reconnect exponential backoff (2→32s), HAD 5 percubaan.
+//   - Habis 5x → onReconnectExhausted (UI toast minta manual reconnect).
+//   - manualReconnect() → reset counter, cuba 5x lagi.
+//   - resumeReconnect() → dipanggil bila app kembali foreground (jika exhausted).
+//   - Offline queue → flush ke /backfill bila reconnect (data tak hilang).
+//   - LWT (Last Will): {online:false} bila putus mendadak.
 
 class MqttService {
   MqttService._internal();
@@ -28,23 +34,31 @@ class MqttService {
   static const String _username = 'wsmqtt';
   static const String _password = 'w5mqtt';
 
+  static const int _maxReconnectAttempts = 5; // had cubaan auto
+
   MqttServerClient? _client;
   String? _deviceId;
   Timer? _reconnectTimer;
   StreamSubscription? _updatesSub;
 
   int _backoffSec = 2;
+  int _reconnectAttempts = 0; // kira cubaan auto semasa
+  bool _exhausted = false; // true bila 5x gagal
   bool _intentional = false;
   bool _initialized = false;
   bool _paused = false;
 
+  // Callbacks (optional — untuk UI).
   void Function(bool connected)? onConnectionChanged;
   void Function(bool success)? onPublishResult;
   void Function(Map<String, dynamic> ack)? onAck;
+  void Function()? onReconnectExhausted; // 5x auto gagal
+  void Function(int attempt, int max)? onReconnectAttempt; // info cubaan
 
   bool get isConnected =>
       _client?.connectionStatus?.state == MqttConnectionState.connected;
   bool get isInitialized => _initialized;
+  bool get isExhausted => _exhausted;
   int get queueLength => MqttOfflineQueue().length;
 
   void pause() => _paused = true;
@@ -56,12 +70,38 @@ class MqttService {
       return;
     }
     if (_initialized && _deviceId != deviceId) {
-      disconnect();
+      disconnect(); // device tukar — reset bersih
     }
     _deviceId = deviceId;
     _initialized = true;
     _intentional = false;
+    _exhausted = false;
+    _reconnectAttempts = 0;
+    _backoffSec = 2;
     await _createAndConnect();
+  }
+
+  /// Reconnect manual — reset counter, cuba 5x lagi dari awal.
+  Future<void> manualReconnect() async {
+    if (_deviceId == null) return;
+    _reconnectTimer?.cancel();
+    _intentional = false;
+    _exhausted = false;
+    _reconnectAttempts = 0;
+    _backoffSec = 2;
+    if (kDebugMode) debugPrint('🔁 [MQTT] Manual reconnect dimulakan');
+    await _createAndConnect();
+  }
+
+  /// Dipanggil bila app kembali foreground. Kalau dah exhausted & belum
+  /// connect, cuba semula (reset counter).
+  Future<void> resumeReconnect() async {
+    if (_deviceId == null) return;
+    if (isConnected) return;
+    if (_exhausted) {
+      if (kDebugMode) debugPrint('▶️ [MQTT] Resume — cuba reconnect semula');
+      await manualReconnect();
+    }
   }
 
   Future<void> _createAndConnect() async {
@@ -78,14 +118,14 @@ class MqttService {
     final client = MqttServerClient.withPort(url, clientId, _port);
     client.useWebSocket = true;
     // NOTA: JANGAN set client.secure untuk wss — skema wss:// + useWebSocket sudah cukup.
-    // client.secure hanya untuk TCP secure, bukan websocket (per doc rasmi mqtt_client).
     client.logging(on: kDebugMode);
     client.keepAlivePeriod = 20;
-    client.autoReconnect = false;
+    client.autoReconnect = false; // kita urus reconnect sendiri
     client.connectTimeoutPeriod = 15000;
     client.onConnected = _onConnected;
     client.onDisconnected = _onDisconnected;
 
+    // LWT — broker hantar ni kalau APK putus mendadak.
     final willPayload = jsonEncode({'online': false, 'ts': _nowMs()});
     client.connectionMessage = MqttConnectMessage()
         .withClientIdentifier(clientId)
@@ -101,7 +141,7 @@ class MqttService {
     try {
       if (kDebugMode) debugPrint('🔌 [MQTT] Connecting $url ...');
       await client.connect();
-      _backoffSec = 2;
+      // Kejayaan diuruskan dalam _onConnected.
     } catch (e) {
       if (kDebugMode) debugPrint('❌ [MQTT] Connect failed: $e');
       onConnectionChanged?.call(false);
@@ -111,10 +151,13 @@ class MqttService {
 
   void _onConnected() {
     _intentional = false;
+    _exhausted = false;
+    _reconnectAttempts = 0; // reset selepas berjaya
     _backoffSec = 2;
     if (kDebugMode) debugPrint('✅ [MQTT] Connected');
     onConnectionChanged?.call(true);
 
+    // Status online (retain).
     _rawPublish(
       MqttTopics(_deviceId!).status,
       jsonEncode({'online': true, 'ts': _nowMs()}),
@@ -122,11 +165,14 @@ class MqttService {
       notify: false,
     );
 
+    // Subscribe ACK dari backend.
     _client!.subscribe(MqttTopics(_deviceId!).ack, MqttQos.atLeastOnce);
 
+    // Listen mesej masuk (ACK).
     _updatesSub?.cancel();
     _updatesSub = _client!.updates!.listen(_onMessages);
 
+    // Flush offline queue → backfill.
     if (!MqttOfflineQueue().isEmpty) {
       MqttOfflineQueue().flush(_client!, _deviceId!);
     }
@@ -142,10 +188,27 @@ class MqttService {
 
   void _scheduleReconnect() {
     _reconnectTimer?.cancel();
+
+    // Sudah habis cubaan → stop, minta manual.
+    if (_reconnectAttempts >= _maxReconnectAttempts) {
+      _exhausted = true;
+      if (kDebugMode) {
+        debugPrint('🛑 [MQTT] Reconnect habis ($_maxReconnectAttempts x)');
+      }
+      onReconnectExhausted?.call();
+      return;
+    }
+
+    _reconnectAttempts++;
     final delay = _backoffSec;
-    if (kDebugMode) debugPrint('🔄 [MQTT] Reconnect dalam ${delay}s');
+    onReconnectAttempt?.call(_reconnectAttempts, _maxReconnectAttempts);
+    if (kDebugMode) {
+      debugPrint(
+        '🔄 [MQTT] Reconnect #$_reconnectAttempts/$_maxReconnectAttempts dalam ${delay}s',
+      );
+    }
     _reconnectTimer = Timer(Duration(seconds: delay), () async {
-      _backoffSec = (_backoffSec * 2).clamp(2, 60);
+      _backoffSec = (_backoffSec * 2).clamp(2, 32); // 2,4,8,16,32
       await _createAndConnect();
     });
   }
@@ -240,6 +303,8 @@ class MqttService {
     } catch (_) {}
     _client = null;
     _initialized = false;
+    _exhausted = false;
+    _reconnectAttempts = 0;
     onConnectionChanged?.call(false);
     if (kDebugMode) debugPrint('🔌 [MQTT] Disconnected (intentional)');
   }

@@ -4,6 +4,7 @@ import '../presentation/boot_screen/boot_screen.dart';
 import '../presentation/home_screen/home_screen.dart';
 import '../presentation/qr_scanner_screen/qr_scanner_screen.dart';
 import '../presentation/settings_screen/settings_screen.dart';
+import '../presentation/profile_screen/profile_screen.dart';
 import '../presentation/provision_screen/provision_screen.dart';
 import '../presentation/scanner_screen/scanner_screen.dart';
 import '../presentation/pending_screen/pending_screen.dart';
@@ -14,6 +15,7 @@ class AppRoutes {
   static const String homeScreen = '/home-screen';
   static const String qrScannerScreen = '/qr-scanner-screen';
   static const String settingsScreen = '/settings-screen';
+  static const String profileScreen = '/profile-screen';
   static const String provisionScreen = '/provision';
   static const String scannerScreen = '/scan';
   static const String pendingScreen = '/pending';
@@ -107,6 +109,29 @@ final GoRouter appRouter = GoRouter(
       pageBuilder: (context, state) => CustomTransitionPage(
         key: state.pageKey,
         child: const SettingsScreen(),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return SlideTransition(
+            position:
+                Tween<Offset>(
+                  begin: const Offset(1.0, 0),
+                  end: Offset.zero,
+                ).animate(
+                  CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeOutCubic,
+                  ),
+                ),
+            child: FadeTransition(opacity: animation, child: child),
+          );
+        },
+        transitionDuration: const Duration(milliseconds: 280),
+      ),
+    ),
+    GoRoute(
+      path: AppRoutes.profileScreen,
+      pageBuilder: (context, state) => CustomTransitionPage(
+        key: state.pageKey,
+        child: const ProfileScreen(),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return SlideTransition(
             position:
