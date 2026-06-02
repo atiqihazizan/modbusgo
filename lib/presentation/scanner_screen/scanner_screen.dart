@@ -38,7 +38,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Imbas Kod QR'),
+        title: const Text('Scan QR Code'),
         backgroundColor: Colors.transparent,
         elevation: 0,
         foregroundColor: Colors.white,
@@ -68,7 +68,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                       ),
                       const SizedBox(height: 16),
                       Text(
-                        'Kamera tidak dapat diakses.\nSila benarkan kebenaran kamera.',
+                        'Camera unavailable.\nPlease allow camera permission.',
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: Colors.white70,
                         ),
@@ -99,7 +99,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
             left: 0,
             right: 0,
             child: Text(
-              'Arahkan kamera ke kod QR',
+              'Point camera at the QR code',
               style: const TextStyle(color: Colors.white70, fontSize: 14),
               textAlign: TextAlign.center,
             ),

@@ -57,7 +57,7 @@ class _PendingScreenState extends State<PendingScreen> {
 
     setState(() {
       _isChecking = false;
-      _message = 'Masih menunggu kelulusan.';
+      _message = 'Still awaiting approval.';
     });
   }
 
@@ -99,7 +99,7 @@ class _PendingScreenState extends State<PendingScreen> {
                   ),
                   const SizedBox(height: 24),
                   Text(
-                    'Menunggu Kelulusan',
+                    'Awaiting Approval',
                     style: theme.textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.bold,
                       color: theme.colorScheme.onSurface,
@@ -108,7 +108,7 @@ class _PendingScreenState extends State<PendingScreen> {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'Peranti anda telah didaftarkan dan sedang menunggu kelulusan daripada pentadbir.',
+                    'Your device has been registered and is awaiting approval from the administrator.',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -133,7 +133,7 @@ class _PendingScreenState extends State<PendingScreen> {
                             ),
                             const SizedBox(height: 12),
                             Text(
-                              'Menyemak…',
+                              'Checking…',
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: theme.colorScheme.onSurfaceVariant,
                               ),
@@ -146,7 +146,7 @@ class _PendingScreenState extends State<PendingScreen> {
                           child: ElevatedButton.icon(
                             onPressed: _checkApproval,
                             icon: const Icon(Icons.refresh),
-                            label: const Text('Semak semula'),
+                            label: const Text('Check Again'),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: theme.colorScheme.primary,
                               foregroundColor: theme.colorScheme.onPrimary,

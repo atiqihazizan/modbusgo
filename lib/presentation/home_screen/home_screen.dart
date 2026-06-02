@@ -40,7 +40,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // Status hidup
   bool _isOnline = false;
   bool _isMoving = false;
-  String _lastEmit = 'Belum dihantar';
+  String _lastEmit = 'Not sent yet';
   String _coordinates = '—';
 
   bool _isRefreshing = false;
@@ -82,19 +82,19 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _startLocation() async {
-    // Mula GPS di latar — tak block UI.
+    // Start GPS in background — does not block UI.
     await LocationService().start();
 
-    // Dengar fix masuk → kemas kini koordinat + status motion.
+    // Listen for incoming fixes → update coordinates + motion status.
     _locSub = LocationService().stream.listen((fix) {
       if (!mounted) return;
       setState(() {
         _coordinates = _fmtCoords(fix.latitude, fix.longitude);
-        _isMoving = fix.speed > 0.5; // ambang gerak (m/s)
+        _isMoving = fix.speed > 0.5; // motion threshold (m/s)
       });
     });
 
-    // Papar fix awal kalau dah ada.
+    // Show initial fix if already available.
     final f = LocationService().lastFix;
     if (f != null && mounted) {
       setState(() => _coordinates = _fmtCoords(f.latitude, f.longitude));
@@ -123,7 +123,7 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() => _isRefreshing = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Status dikemas kini'),
+          content: const Text('Status updated'),
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
@@ -139,23 +139,25 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final mqtt = MqttService();
 
-    // Pastikan connected (init sekali — guna device_id sebenar).
+    // Ensure connected (init once — use real device_id).
     if (!mqtt.isConnected) {
       final deviceId = await DeviceIdentityService().getDeviceId();
       if (deviceId.isEmpty) {
         if (mounted) {
           setState(() => _isEmitting = false);
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Device ID tiada — provision dulu')),
+            const SnackBar(
+              content: Text('Device ID missing — provision first'),
+            ),
           );
         }
         return;
       }
       await mqtt.init(deviceId: deviceId);
-      await Future.delayed(const Duration(seconds: 2)); // beri masa connect
+      await Future.delayed(const Duration(seconds: 2)); // allow time to connect
     }
 
-    // Guna fix GPS sebenar kalau ada.
+    // Use real GPS fix if available.
     final fix = LocationService().lastFix;
     mqtt.publishBundle({
       'data_type': 'MG',
@@ -171,7 +173,7 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _isEmitting = false;
         _isOnline = mqtt.isConnected;
-        _lastEmit = 'Baru sahaja';
+        _lastEmit = 'Just now';
         if (last != null) {
           _coordinates = _fmtCoords(last.latitude, last.longitude);
         }
@@ -179,9 +181,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            mqtt.isConnected
-                ? 'Data tracking dihantar'
-                : 'Luar talian — data beratur',
+            mqtt.isConnected ? 'Tracking data sent' : 'Offline — data queued',
           ),
           backgroundColor: mqtt.isConnected ? AppTheme.success : Colors.orange,
           behavior: SnackBarBehavior.floating,
@@ -204,7 +204,7 @@ class _HomeScreenState extends State<HomeScreen> {
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('GPS dikemas kini'),
+          content: const Text('GPS updated'),
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
@@ -215,7 +215,7 @@ class _HomeScreenState extends State<HomeScreen> {
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('GPS tidak tersedia. Hidupkan GPS & benarkan lokasi.'),
+          content: Text('GPS unavailable. Enable GPS and allow location.'),
           behavior: SnackBarBehavior.floating,
           duration: Duration(seconds: 2),
         ),

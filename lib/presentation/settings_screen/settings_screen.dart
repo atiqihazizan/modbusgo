@@ -32,15 +32,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _autoReconnect = true;
   bool _isSaving = false;
 
-  // Data sebenar — dimuat dari storage / package info
+  // Real data — loaded from storage / package info
   String _deviceName = '—';
   String _deviceId = '—';
-  final String _deviceModel = '—'; // tiada sumber (telefon, bukan RTU)
-  final String _firmwareVersion = '—'; // tiada sumber
+  final String _deviceModel = '—'; // no source (phone, not RTU)
+  final String _firmwareVersion = '—'; // no source
   String _agencyName = '—';
   String _agencyCode = '—';
   String _agencyToken = '—';
-  final String _registeredAt = '—'; // tiada sumber (storage tak simpan)
+  final String _registeredAt = '—'; // no source (storage not saved)
   String _appVersion = '—';
   String _flutterVersion = '—';
 
@@ -80,11 +80,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ? _maskToken(agencyToken)
           : '—';
       _appVersion = appVer;
-      _flutterVersion = 'Flutter (lihat About)';
+      _flutterVersion = 'Flutter (see About)';
     });
   }
 
-  // Tutup sebahagian token untuk paparan.
+  // Mask part of token for display.
   String _maskToken(String token) {
     if (token.length <= 8) return '••••';
     return '${token.substring(0, 4)}••••••••${token.substring(token.length - 4)}';
@@ -95,15 +95,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final ok = await RegistrationService().restoreFromBackend();
     if (!mounted) return;
     if (ok) {
-      await _loadInfo(); // muat semula nilai terkini dari storage
+      await _loadInfo(); // reload latest values from storage
     }
     setState(() => _isSyncing = false);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           ok
-              ? 'Data diselaras dari pelayan'
-              : 'Sync gagal — semak sambungan / pendaftaran',
+              ? 'Data synced from server'
+              : 'Sync failed — check connection / registration',
         ),
         backgroundColor: ok ? AppTheme.success : Colors.orange,
         behavior: SnackBarBehavior.floating,
@@ -207,7 +207,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     color: theme.colorScheme.primary,
                     size: 22,
                   ),
-                  tooltip: 'Sync data dari pelayan',
+                  tooltip: 'Sync data from server',
                 ),
           _isSaving
               ? const Padding(

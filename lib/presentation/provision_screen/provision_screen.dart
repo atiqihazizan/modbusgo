@@ -74,8 +74,8 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'GPS tidak tersedia. Provisioning dibatalkan. '
-            'Sila hidupkan GPS & benarkan lokasi, kemudian cuba lagi.',
+            'GPS unavailable. Provisioning cancelled. '
+            'Enable GPS and allow location access, then try again.',
           ),
         ),
       );
@@ -105,7 +105,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
     }
   }
 
-  /// Hantar satu bundle lat/lon SEBENAR selepas provisioning berjaya.
+  /// Send one real lat/lon bundle after successful provisioning.
   Future<void> _emitInitialLocation(LocationFix fix) async {
     try {
       final mqtt = MqttService();
@@ -124,7 +124,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
         'sensor_data': [-1],
       });
     } catch (_) {
-      // Senyap — jangan halang aliran.
+      // Silent — do not block flow.
     }
   }
 

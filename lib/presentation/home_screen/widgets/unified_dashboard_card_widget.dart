@@ -200,7 +200,7 @@ class _StatusBar extends StatelessWidget {
             '$connectionLabel · $motionLabel',
             style: const TextStyle(
               color: Colors.white70,
-              fontSize: 11,
+              fontSize: 9,
               fontWeight: FontWeight.w600,
               letterSpacing: 0.4,
             ),
@@ -213,7 +213,7 @@ class _StatusBar extends StatelessWidget {
             lastEmit.isNotEmpty ? lastEmit : 'N/A · 0 km/h',
             style: const TextStyle(
               color: Colors.white54,
-              fontSize: 11,
+              fontSize: 9,
               fontWeight: FontWeight.w500,
             ),
           ),
