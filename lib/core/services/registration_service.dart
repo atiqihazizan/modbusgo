@@ -4,9 +4,6 @@ import 'package:flutter/foundation.dart';
 import './api_client.dart';
 import './device_identity_service.dart';
 import './local_storage_service.dart';
-import 'api_client.dart';
-import 'device_identity_service.dart';
-import 'local_storage_service.dart';
 
 // Registration — register device + check (restore after reinstall).
 // register: POST /devices-user/register  (header x-agency-token)
@@ -74,8 +71,9 @@ class RegistrationService {
     try {
       final token = await _storage.getAgencyToken();
       if (token == null || token.isEmpty) {
-        if (kDebugMode)
+        if (kDebugMode) {
           print('[Registration] no agency_token — provision first');
+        }
         return const RegisterResult(success: false);
       }
 
@@ -92,8 +90,9 @@ class RegistrationService {
           res.data['success'] == true;
 
       if (!ok) {
-        if (kDebugMode)
+        if (kDebugMode) {
           print('[Registration] failed: ${res.statusCode} ${res.data}');
+        }
         return const RegisterResult(success: false);
       }
 
@@ -150,8 +149,9 @@ class RegistrationService {
     final agencyName = d['agency_name'] as String?;
     final needApproval = d['need_approval'] == true;
 
-    if (token != null && token.isNotEmpty)
+    if (token != null && token.isNotEmpty) {
       await _storage.saveAgencyToken(token);
+    }
     if (agencyId != null) await _storage.saveAgencyId(agencyId);
     await _storage.saveAgencyInfo(name: agencyName);
     if (name != null) {

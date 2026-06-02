@@ -26,6 +26,7 @@ dependencies:
   go_router: ^14.6.1
   flutter_secure_storage: ^9.2.2 # Secure persistent storage for device_id on Android (EncryptedSharedPreferences) and iOS (Keychain)
   uuid: ^4.5.1                   # Generate UUID v4 for stable device identity
+  mobile_scanner: ^5.2.3         # QR/barcode scanning for provisioning scanner screen
 
 
 dev_dependencies:

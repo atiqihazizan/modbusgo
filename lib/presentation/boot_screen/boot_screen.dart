@@ -1,17 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../core/app_export.dart';
-import './widgets/boot_action_widget.dart';
-import './widgets/provisioning_status_widget.dart';
+import '../../core/services/device_identity_service.dart';
+import '../../core/services/local_storage_service.dart';
+import '../../core/services/registration_service.dart';
 import './widgets/splash_logo_widget.dart';
-
-// Mock device state — TODO: connect real logic
-class _MockDeviceState {
-  static bool isProvisioned = false;
-  static bool isOnline = false;
-  static String deviceName = '';
-  static String statusMessage = 'Initializing…';
-}
 
 class BootScreen extends StatefulWidget {
   const BootScreen({super.key});
@@ -22,12 +15,8 @@ class BootScreen extends StatefulWidget {
 
 class _BootScreenState extends State<BootScreen>
     with SingleTickerProviderStateMixin {
-  // TODO: Replace with [Riverpod/Bloc] for production
-  bool _isLoading = true;
-  bool _isProvisioned = false;
-  bool _isOnline = false;
-  String _statusMessage = 'Initializing…';
-  bool _showAction = false;
+  final bool _isLoading = true;
+  String _statusMessage = 'Memulakan…';
 
   late AnimationController _bgController;
   late Animation<double> _bgAnimation;
@@ -53,42 +42,41 @@ class _BootScreenState extends State<BootScreen>
   }
 
   Future<void> _runBootSequence() async {
-    // TODO: connect real logic — check SharedPreferences for provisioning state
-    await Future.delayed(const Duration(milliseconds: 600));
-    if (!mounted) return;
-    setState(() => _statusMessage = 'Checking device registration…');
+    try {
+      await DeviceIdentityService().getDeviceId();
 
-    await Future.delayed(const Duration(milliseconds: 800));
-    if (!mounted) return;
+      if (!mounted) return;
+      setState(() => _statusMessage = 'Menyemak pendaftaran peranti…');
 
-    // Mock: simulate not provisioned
-    final provisioned = _MockDeviceState.isProvisioned;
-    final online = _MockDeviceState.isOnline;
+      final storage = LocalStorageService();
+      final hasDevice = await storage.hasDeviceInfo();
+      final hasToken = await storage.hasAgencyToken();
 
-    setState(() {
-      _isLoading = false;
-      _isProvisioned = provisioned;
-      _isOnline = online;
-      _statusMessage = provisioned
-          ? (online ? 'Device ready' : 'Device offline — connecting…')
-          : 'Device not registered';
-      _showAction = true;
-    });
+      if (hasDevice && hasToken) {
+        final needApproval = await storage.getNeedApproval();
+        if (!mounted) return;
+        context.go(
+          needApproval ? AppRoutes.pendingScreen : AppRoutes.homeScreen,
+        );
+        return;
+      }
 
-    if (provisioned) {
-      // TODO: connect real logic — navigate to home after verifying registration
-      await Future.delayed(const Duration(milliseconds: 600));
-      if (mounted) context.go(AppRoutes.homeScreen);
+      setState(() => _statusMessage = 'Memulihkan data peranti…');
+      final restored = await RegistrationService().restoreFromBackend();
+
+      if (!mounted) return;
+      if (restored) {
+        final needApproval = await storage.getNeedApproval();
+        if (!mounted) return;
+        context.go(
+          needApproval ? AppRoutes.pendingScreen : AppRoutes.homeScreen,
+        );
+      } else {
+        context.go(AppRoutes.provisionScreen);
+      }
+    } catch (_) {
+      if (mounted) context.go(AppRoutes.provisionScreen);
     }
-  }
-
-  void _onScanQr() {
-    context.push(AppRoutes.qrScannerScreen);
-  }
-
-  void _onDemoGoHome() {
-    // Demo shortcut — TODO: remove in production
-    context.go(AppRoutes.homeScreen);
   }
 
   @override
@@ -135,29 +123,7 @@ class _BootScreenState extends State<BootScreen>
                           message: _statusMessage,
                           isLoading: _isLoading,
                         ),
-                        const Spacer(flex: 2),
-                        AnimatedOpacity(
-                          opacity: _showAction ? 1.0 : 0.0,
-                          duration: const Duration(milliseconds: 400),
-                          child: AnimatedSlide(
-                            offset: _showAction
-                                ? Offset.zero
-                                : const Offset(0, 0.3),
-                            duration: const Duration(milliseconds: 400),
-                            curve: Curves.easeOutCubic,
-                            child: BootActionWidget(
-                              isProvisioned: _isProvisioned,
-                              onScanQr: _onScanQr,
-                              onDemoGoHome: _onDemoGoHome,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 32),
-                        ProvisioningStatusWidget(
-                          isProvisioned: _isProvisioned,
-                          isOnline: _isOnline,
-                        ),
-                        const SizedBox(height: 24),
+                        const Spacer(flex: 3),
                         Text(
                           'ModbusGo v1.0.0',
                           style: theme.textTheme.labelSmall?.copyWith(
@@ -200,17 +166,15 @@ class _StatusMessageWidget extends StatelessWidget {
             textAlign: TextAlign.center,
           ),
         ),
-        if (isLoading) ...[
-          const SizedBox(height: 20),
-          SizedBox(
-            width: 24,
-            height: 24,
-            child: CircularProgressIndicator(
-              strokeWidth: 2.5,
-              color: theme.colorScheme.primary,
-            ),
+        const SizedBox(height: 20),
+        SizedBox(
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(
+            strokeWidth: 2.5,
+            color: theme.colorScheme.primary,
           ),
-        ],
+        ),
       ],
     );
   }

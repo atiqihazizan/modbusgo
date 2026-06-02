@@ -4,8 +4,6 @@ import 'package:dio/dio.dart';
 
 import './api_client.dart';
 import './local_storage_service.dart';
-import 'api_client.dart';
-import 'local_storage_service.dart';
 
 // Provisioning — redeem agency_token from scanned QR deep link.
 // QR deep link form: modbusgo://provision?payload=<encryptedHex>
@@ -101,8 +99,9 @@ class ProvisioningService {
   // Verify scanned QR + persist agency data on success.
   Future<ProvisionResult> provisionFromScan(String scannedValue) async {
     final payload = extractPayload(scannedValue);
-    if (payload == null)
+    if (payload == null) {
       return ProvisionResult.fail(ProvisionError.invalidLink);
+    }
 
     try {
       final res = await _api.dio.post(
