@@ -1,12 +1,12 @@
-import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'dart:async';
 
-import '../../core/services/local_storage_service.dart';
+import 'package:flutter/material.dart';
+
+import '../../core/app_export.dart';
 import '../../core/services/device_identity_service.dart';
+import '../../core/services/local_storage_service.dart';
 import '../../core/services/mqtt_service.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/custom_icon_widget.dart';
+import '../../core/services/registration_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -16,7 +16,7 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  // --- Data ---
+  // ── Data ──
   String _deviceName = '';
   String _deviceId = '';
   String _agencyName = '';
@@ -24,32 +24,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _agencyToken = '';
   bool _isOnline = false;
   bool _isLoading = true;
+
+  // ── Agency list / switch ──
+  List<AgencyOption> _agencies = [];
+  AgencyOption? _selectedAgency;
+  bool _isSwitching = false;
+
+  // ── Reconnect ──
   bool _isReconnecting = false;
+
+  // ── Timer for live MQTT status ──
+  Timer? _statusTimer;
 
   @override
   void initState() {
     super.initState();
-    _loadData();
-    // Listen to MQTT connection changes
-    MqttService().onConnectionChanged = (connected) {
-      if (mounted) setState(() => _isOnline = connected);
-    };
+    _loadInfo();
+    // Refresh MQTT status every 2 seconds
+    _statusTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (mounted) {
+        setState(() => _isOnline = MqttService().isConnected);
+      }
+    });
   }
 
   @override
   void dispose() {
-    // Remove listener to avoid stale callback
-    MqttService().onConnectionChanged = null;
+    _statusTimer?.cancel();
     super.dispose();
   }
 
-  Future<void> _loadData() async {
+  Future<void> _loadInfo() async {
     final storage = LocalStorageService();
     final deviceInfo = await storage.getDeviceInfo();
     final agencyName = await storage.getAgencyName();
     final agencyCode = await storage.getAgencyCode();
     final agencyToken = await storage.getAgencyToken();
     final deviceId = await DeviceIdentityService().getDeviceId();
+    final agencies = await RegistrationService().listAgencies();
 
     if (mounted) {
       setState(() {
@@ -59,6 +71,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _agencyCode = agencyCode ?? '-';
         _agencyToken = agencyToken ?? '';
         _isOnline = MqttService().isConnected;
+        _agencies = agencies;
         _isLoading = false;
       });
     }
@@ -70,12 +83,102 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return '${token.substring(0, 4)}****';
   }
 
+  // ── Switch Agency ──
+  Future<void> _onConfirmSwitch() async {
+    if (_selectedAgency == null) {
+      _showToast('Please select an agency', isError: true);
+      return;
+    }
+
+    // Confirmation dialog
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Switch Agency',
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+            color: const Color(0xFF1E293B),
+          ),
+        ),
+        content: Text(
+          'Switch to ${_selectedAgency!.name}? The device will require admin approval again.',
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 14,
+            color: const Color(0xFF475569),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.plusJakartaSans(
+                fontWeight: FontWeight.w600,
+                color: const Color(0xFF64748B),
+              ),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primary,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: Text(
+              'OK',
+              style: GoogleFonts.plusJakartaSans(
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+
+    // Check internet connectivity
+    final conn = await Connectivity().checkConnectivity();
+    final hasNet = !conn.contains(ConnectivityResult.none);
+    if (!hasNet) {
+      _showToast(
+        'No internet connection. Please connect and try again.',
+        isError: true,
+      );
+      return;
+    }
+
+    setState(() => _isSwitching = true);
+
+    // Disconnect MQTT (publishes {online:false} retained, tears down)
+    MqttService().disconnect();
+
+    final result = await RegistrationService().switchAgency(
+      _selectedAgency!.id,
+    );
+
+    if (!mounted) return;
+
+    if (result.success) {
+      context.go(AppRoutes.bootScreen);
+    } else {
+      setState(() => _isSwitching = false);
+      _showToast('Switch failed. Please try again.', isError: true);
+    }
+  }
+
+  // ── Reconnect MQTT ──
   Future<void> _handleReconnect() async {
     setState(() => _isReconnecting = true);
 
     MqttService().manualReconnect();
 
-    // Wait 2 seconds for connection attempt
     await Future.delayed(const Duration(seconds: 2));
 
     if (!mounted) return;
@@ -86,27 +189,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _isReconnecting = false;
     });
 
+    _showToast(
+      connected ? 'Connected' : 'Reconnect failed',
+      isError: !connected,
+    );
+  }
+
+  void _showToast(String message, {bool isError = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
           children: [
             CustomIconWidget(
-              iconName: connected ? 'check_circle' : 'error_outline',
+              iconName: isError ? 'error_outline' : 'check_circle',
               size: 18,
               color: Colors.white,
             ),
             const SizedBox(width: 8),
-            Text(
-              connected ? 'Connected' : 'Gagal sambung',
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: Colors.white,
+            Expanded(
+              child: Text(
+                message,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.white,
+                ),
               ),
             ),
           ],
         ),
-        backgroundColor: connected ? AppTheme.success : AppTheme.errorColor,
+        backgroundColor: isError ? AppTheme.errorColor : AppTheme.success,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         duration: const Duration(seconds: 3),
@@ -114,10 +226,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  // ─────────────────────────────────────────────
+  // BUILD
+  // ─────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
     return Scaffold(
       backgroundColor: AppTheme.backgroundLight,
       appBar: AppBar(
@@ -148,17 +261,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // ── SECTION 1: Profile ──
-                  _buildProfileSection(colorScheme),
+                  // ── 1) Profile Section ──
+                  _buildProfileSection(),
                   const SizedBox(height: 20),
 
-                  // ── SECTION 2: Agency Card ──
-                  _buildAgencyCard(colorScheme),
-                  const SizedBox(height: 24),
+                  // ── 2) Agency Card ──
+                  _buildAgencyCard(),
+                  const SizedBox(height: 20),
 
-                  // ── SECTION 3: Reconnect Button ──
+                  // ── 3) Switch Agency ──
+                  _buildSwitchAgencySection(),
+                  const SizedBox(height: 20),
+
+                  // ── 4) Reconnect MQTT ──
                   _buildReconnectButton(),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 24),
                 ],
               ),
             ),
@@ -166,9 +283,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   // ─────────────────────────────────────────────
-  // Profile Section
+  // 1) Profile Section
   // ─────────────────────────────────────────────
-  Widget _buildProfileSection(ColorScheme colorScheme) {
+  Widget _buildProfileSection() {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -178,11 +295,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       child: Column(
         children: [
-          // Avatar
+          // Round avatar
           Container(
             width: 80,
             height: 80,
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               shape: BoxShape.circle,
               color: AppTheme.primaryContainer,
             ),
@@ -194,7 +311,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           const SizedBox(height: 14),
 
-          // Device Name
+          // Device Name — large bold
           Text(
             _deviceName,
             style: GoogleFonts.plusJakartaSans(
@@ -208,7 +325,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           const SizedBox(height: 6),
 
-          // Device ID — monospace
+          // Device ID — small monospace
           Text(
             _deviceId,
             style: GoogleFonts.sourceCodePro(
@@ -223,14 +340,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           const SizedBox(height: 14),
 
-          // MQTT Status Chip
-          _buildMqttChip(),
+          // Status chip
+          _buildStatusChip(),
         ],
       ),
     );
   }
 
-  Widget _buildMqttChip() {
+  Widget _buildStatusChip() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       decoration: BoxDecoration(
@@ -269,9 +386,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   // ─────────────────────────────────────────────
-  // Agency Card
+  // 2) Agency Card
   // ─────────────────────────────────────────────
-  Widget _buildAgencyCard(ColorScheme colorScheme) {
+  Widget _buildAgencyCard() {
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.cardLight,
@@ -281,7 +398,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Card header
+          // Header
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
             child: Row(
@@ -319,7 +436,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             color: Color(0xFFEEF2F7),
           ),
 
-          // Agency Code
+          // Agency Code — badge
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
@@ -369,7 +486,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             color: Color(0xFFEEF2F7),
           ),
 
-          // Agency Token (masked)
+          // Agency Token — masked
           _buildInfoRow(
             icon: 'vpn_key',
             label: 'Agency Token',
@@ -434,18 +551,149 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   // ─────────────────────────────────────────────
-  // Reconnect Button
+  // 3) Switch Agency Section
+  // ─────────────────────────────────────────────
+  Widget _buildSwitchAgencySection() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.cardLight,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Section header
+          Row(
+            children: [
+              const CustomIconWidget(
+                iconName: 'swap_horiz',
+                size: 18,
+                color: AppTheme.primary,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Switch Agency',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.primary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Dropdown + Confirm button row
+          Row(
+            children: [
+              // Dropdown — Expanded
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFCBD5E1)),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<AgencyOption>(
+                      value: _selectedAgency,
+                      isExpanded: true,
+                      hint: Text(
+                        _agencies.isEmpty
+                            ? 'No agencies available'
+                            : 'Select agency',
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 13,
+                          color: const Color(0xFF94A3B8),
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      onChanged: _isSwitching || _agencies.isEmpty
+                          ? null
+                          : (val) => setState(() => _selectedAgency = val),
+                      items: _agencies
+                          .map(
+                            (a) => DropdownMenuItem<AgencyOption>(
+                              value: a,
+                              child: Text(
+                                '${a.name} (${a.code})',
+                                style: GoogleFonts.plusJakartaSans(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: const Color(0xFF1E293B),
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+
+              // Confirm button
+              SizedBox(
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: _isSwitching ? null : _onConfirmSwitch,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    disabledBackgroundColor: AppTheme.primary.withAlpha(153),
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: _isSwitching
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.white,
+                            ),
+                          ),
+                        )
+                      : Text(
+                          'Confirm',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // 4) Reconnect MQTT Button
   // ─────────────────────────────────────────────
   Widget _buildReconnectButton() {
+    // Disabled when online OR reconnecting
+    final bool disabled = _isOnline || _isReconnecting;
+
     return SizedBox(
       width: double.infinity,
       height: 50,
       child: ElevatedButton(
-        onPressed: _isReconnecting ? null : _handleReconnect,
+        onPressed: disabled ? null : _handleReconnect,
         style: ElevatedButton.styleFrom(
           backgroundColor: AppTheme.primary,
           foregroundColor: Colors.white,
-          disabledBackgroundColor: AppTheme.primary.withAlpha(153),
+          disabledBackgroundColor: AppTheme.primary.withAlpha(102),
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -477,10 +725,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
             : Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const CustomIconWidget(
+                  CustomIconWidget(
                     iconName: 'wifi_tethering',
                     size: 20,
-                    color: Colors.white,
+                    color: disabled
+                        ? Colors.white.withAlpha(153)
+                        : Colors.white,
                   ),
                   const SizedBox(width: 8),
                   Text(
@@ -488,7 +738,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     style: GoogleFonts.plusJakartaSans(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
-                      color: Colors.white,
+                      color: disabled
+                          ? Colors.white.withAlpha(153)
+                          : Colors.white,
                     ),
                   ),
                 ],

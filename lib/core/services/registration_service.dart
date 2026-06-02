@@ -36,6 +36,13 @@ class RegisterResult {
   });
 }
 
+class AgencyOption {
+  final int id;
+  final String code;
+  final String name;
+  const AgencyOption({required this.id, required this.code, required this.name});
+}
+
 class RegistrationService {
   RegistrationService._internal();
   static final RegistrationService _instance = RegistrationService._internal();
@@ -135,6 +142,79 @@ class RegistrationService {
       return const RegisterResult(success: false);
     } catch (e) {
       if (kDebugMode) print('[Registration] error: $e');
+      return const RegisterResult(success: false);
+    }
+  }
+
+  // PUBLIC — senarai agency untuk pemilih tukar agency.
+  Future<List<AgencyOption>> listAgencies() async {
+    try {
+      final res = await _api.dio.get('/devices-user/agencies');
+      if (res.statusCode == 200 && res.data is Map) {
+        final list = (res.data['agencies'] as List?) ?? const [];
+        return list
+            .whereType<Map>()
+            .map(
+              (a) => AgencyOption(
+                id: a['id'] as int,
+                code: (a['code'] ?? '').toString(),
+                name: (a['name'] ?? '').toString(),
+              ),
+            )
+            .toList();
+      }
+      return const [];
+    } catch (e) {
+      if (kDebugMode) print('[Registration] listAgencies error: $e');
+      return const [];
+    }
+  }
+
+  // PUBLIC — switch device ke agency lain tanpa QR. Kekal need_approval.
+  Future<RegisterResult> switchAgency(int agencyId) async {
+    try {
+      final deviceId = await _identity.getDeviceId();
+      if (deviceId.isEmpty) return const RegisterResult(success: false);
+
+      final res = await _api.dio.post(
+        '/devices-user/switch-agency',
+        data: {'device_id': deviceId, 'agency_id': agencyId},
+      );
+
+      final ok =
+          res.statusCode == 200 &&
+          res.data is Map &&
+          res.data['success'] == true;
+      if (!ok) return const RegisterResult(success: false);
+
+      final body = res.data as Map;
+      final needApproval = body['need_approval'] == true;
+      final respToken = body['agency_token'] as String?;
+      final respAgencyId = body['agency_id'] is int ? body['agency_id'] as int : null;
+      final agencyCode = body['agency_code'] as String?;
+      final agencyName = body['agency_name'] as String?;
+
+      // Persist state agency baru.
+      if (respToken != null && respToken.isNotEmpty) {
+        await _storage.saveAgencyToken(respToken);
+      }
+      if (respAgencyId != null) await _storage.saveAgencyId(respAgencyId);
+      await _storage.saveAgencyInfo(code: agencyCode, name: agencyName);
+      await _storage.saveNeedApproval(needApproval);
+
+      return RegisterResult(
+        success: true,
+        needApproval: needApproval,
+        deviceId: deviceId,
+        agencyToken: respToken,
+        agencyId: respAgencyId,
+        agencyName: agencyName,
+      );
+    } on DioException catch (e) {
+      if (kDebugMode) print('[Registration] switchAgency DioException: ${e.message}');
+      return const RegisterResult(success: false);
+    } catch (e) {
+      if (kDebugMode) print('[Registration] switchAgency error: $e');
       return const RegisterResult(success: false);
     }
   }
