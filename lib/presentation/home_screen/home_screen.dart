@@ -235,14 +235,14 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: theme.colorScheme.surface,
         elevation: 0,
         scrolledUnderElevation: 2,
-        title: Text(
-          _deviceName.toUpperCase(),
-          overflow: TextOverflow.ellipsis, // Menambah '...' jika teks terlalu panjang
-          maxLines: 1, // Memaksa teks sentiasa dalam 1 baris
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w700,
-          ),
-        ),
+        // title: Text(
+        //   _deviceName.toUpperCase(),
+        //   overflow: TextOverflow.ellipsis, // Menambah '...' jika teks terlalu panjang
+        //   maxLines: 1, // Memaksa teks sentiasa dalam 1 baris
+        //   style: theme.textTheme.titleLarge?.copyWith(
+        //     fontWeight: FontWeight.w700,
+        //   ),
+        // ),
         // title: Row(
         //   children: [
         //     // GO logo — transparent background
@@ -319,21 +319,21 @@ class _HomeScreenState extends State<HomeScreen> {
                   const ModbusDevicePanelWidget(),
                   const SizedBox(height: 12),
                   // Modbus Settings — configure slave ID, address, length, type, etc.
-                  const SizedBox(height: 20),
-                  HomeActionBarWidget(
-                    isEmitting: _isEmitting,
-                    onManualEmit: _onManualEmit,
-                    onViewLogs: () {
-                      // TODO: connect real logic — navigate to TrackingLogsScreen
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Logs screen — coming soon'),
-                          behavior: SnackBarBehavior.floating,
-                          duration: Duration(seconds: 1),
-                        ),
-                      );
-                    },
-                  ),
+                  // const SizedBox(height: 20),
+                  // HomeActionBarWidget(
+                  //   isEmitting: _isEmitting,
+                  //   onManualEmit: _onManualEmit,
+                  //   onViewLogs: () {
+                  //     // TODO: connect real logic — navigate to TrackingLogsScreen
+                  //     ScaffoldMessenger.of(context).showSnackBar(
+                  //       const SnackBar(
+                  //         content: Text('Logs screen — coming soon'),
+                  //         behavior: SnackBarBehavior.floating,
+                  //         duration: Duration(seconds: 1),
+                  //       ),
+                  //     );
+                  //   },
+                  // ),
                 ],
               ),
             ),

@@ -58,6 +58,7 @@ class UnifiedDashboardCardWidget extends StatelessWidget {
           // ── Top Row: Agency Name + Action Buttons ──────────────────
           _AgencyRow(
             agencyName: agencyName,
+            agencyCode: agencyCode,
             onRefreshGps: onRefreshGps,
             onManualEmit: onManualEmit,
             isEmitting: isEmitting,
@@ -81,12 +82,14 @@ class UnifiedDashboardCardWidget extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _AgencyRow extends StatelessWidget {
   final String agencyName;
+  final String agencyCode;
   final VoidCallback onRefreshGps;
   final VoidCallback onManualEmit;
   final bool isEmitting;
 
   const _AgencyRow({
     required this.agencyName,
+    required this.agencyCode,
     required this.onRefreshGps,
     required this.onManualEmit,
     required this.isEmitting,
@@ -101,16 +104,57 @@ class _AgencyRow extends StatelessWidget {
         children: [
           // Agency name — bold, prominent
           Expanded(
-            child: Text(
-              agencyName.isNotEmpty ? agencyName : '—',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontSize: 14,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.3,
-                color: theme.colorScheme.onSurface,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            // child: Text(
+            //   agencyName.isNotEmpty ? agencyName : '—',
+            //   style: theme.textTheme.titleMedium?.copyWith(
+            //     fontSize: 14,
+            //     fontWeight: FontWeight.w800,
+            //     letterSpacing: 0.3,
+            //     color: theme.colorScheme.onSurface,
+            //   ),
+            //   maxLines: 1,
+            //   overflow: TextOverflow.ellipsis,
+            // ),
+            // child: Row(
+            //   children: [
+            //     // GO logo — transparent background
+            //     // SizedBox(width: 36, height: 36, child: SizedBox()),
+            //     // const SizedBox(width: 10),
+            //     Column(
+            //       crossAxisAlignment: CrossAxisAlignment.start,
+            //       children: [
+            //         Text(
+            //           _deviceName.toUpperCase(),
+            //           style: theme.textTheme.titleLarge?.copyWith(
+            //             fontWeight: FontWeight.w700,
+            //           ),
+            //         ),
+            //         Text(
+            //           _deviceId,
+            //           style: theme.textTheme.labelSmall?.copyWith(
+            //             color: theme.colorScheme.onSurfaceVariant,
+            //           ),
+            //         ),
+            //       ],
+            //     ),
+            //   ],
+            // ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  agencyName.isNotEmpty ? agencyName : '—',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Text(
+                  agencyCode.isNotEmpty ? agencyCode.toUpperCase() : '-',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(width: 8),
