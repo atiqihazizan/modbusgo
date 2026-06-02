@@ -76,6 +76,13 @@ class _PendingScreenState extends State<PendingScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const Spacer(flex: 2),
+                  Image.asset(
+                    'assets/images/app_icon-1780309918034.png',
+                    width: 90,
+                    height: 90,
+                    semanticLabel: 'ModbusGo app logo',
+                  ),
+                  const SizedBox(height: 24),
                   Container(
                     width: 80,
                     height: 80,
