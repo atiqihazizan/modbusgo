@@ -13,6 +13,18 @@ import './widgets/home_action_bar_widget.dart';
 import './widgets/modbus_device_panel_widget.dart';
 import './widgets/tracking_status_bar_widget.dart';
 
+// Mock data — TODO: Replace with [Riverpod/Bloc] for production
+// class _MockHomeState {
+//   static const String deviceName = 'RTU-UNIT-04';
+//   static const String deviceId = 'MBG-2024-0047';
+//   static const String agencyName = 'Jabatan Pengairan Selangor';
+//   static const String agencyCode = 'JPS-SEL';
+//   static bool isOnline = true;
+//   static bool isMoving = false;
+//   static String lastEmit = '2 min ago';
+//   static String lastCoordinates = '3.1390° N, 101.6869° E';
+// }
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 

@@ -67,6 +67,7 @@ class RegistrationService {
   }
 
   // Register device with current agency_token. Returns success=false on any failure.
+  // Register device with current agency_token. Returns success=false on any failure.
   Future<RegisterResult> registerDevice({required String name}) async {
     try {
       final token = await _storage.getAgencyToken();
@@ -104,6 +105,7 @@ class RegistrationService {
       final agencyId = body['agency_id'] is int
           ? body['agency_id'] as int
           : null;
+      final agencyCode = body['agency_code'] as String?;
       final agencyName = body['agency_name'] as String?;
 
       // Persist confirmed state.
@@ -116,7 +118,7 @@ class RegistrationService {
         await _storage.saveAgencyToken(respToken);
       }
       if (agencyId != null) await _storage.saveAgencyId(agencyId);
-      await _storage.saveAgencyInfo(name: agencyName);
+      await _storage.saveAgencyInfo(code: agencyCode, name: agencyName);
 
       return RegisterResult(
         success: true,
@@ -146,6 +148,7 @@ class RegistrationService {
     final token = d['agency_token'] as String?;
     final name = d['name'] as String?;
     final agencyId = d['agency_id'] is int ? d['agency_id'] as int : null;
+    final agencyCode = d['agency_code'] as String?;
     final agencyName = d['agency_name'] as String?;
     final needApproval = d['need_approval'] == true;
 
@@ -153,7 +156,7 @@ class RegistrationService {
       await _storage.saveAgencyToken(token);
     }
     if (agencyId != null) await _storage.saveAgencyId(agencyId);
-    await _storage.saveAgencyInfo(name: agencyName);
+    await _storage.saveAgencyInfo(code: agencyCode, name: agencyName);
     if (name != null) {
       final id = await _identity.getDeviceId();
       await _storage.saveDeviceInfo(deviceId: id, name: name);
