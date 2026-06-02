@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../theme/app_theme.dart';
 import '../../widgets/custom_icon_widget.dart';
+import '../../core/services/local_storage_service.dart';
+import '../../core/services/device_identity_service.dart';
+import '../../core/services/registration_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -12,7 +16,7 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  // Mock values — TODO: load from SharedPreferences / real config
+  // Mock values — TODO: connect real logic — persist to SharedPreferences
   final _mqttUrlController = TextEditingController(
     text: 'mqtt://broker.modbusgo.io:1883',
   );
@@ -28,17 +32,86 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _autoReconnect = true;
   bool _isSaving = false;
 
-  // Mock device & agency info
-  static const _deviceName = 'RTU-UNIT-04';
-  static const _deviceId = 'MBG-2024-0047';
-  static const _deviceModel = 'ModbusGo RTU v2';
-  static const _firmwareVersion = '2.1.4';
-  static const _agencyName = 'Jabatan Pengairan Selangor';
-  static const _agencyCode = 'JPS-SEL';
-  static const _agencyToken = 'jps-sel-••••••••••••3f9a';
-  static const _registeredAt = '2024-11-15 09:32:00';
-  static const _appVersion = '1.3.0 (build 47)';
-  static const _flutterVersion = 'Flutter 3.24.0';
+  // Data sebenar — dimuat dari storage / package info
+  String _deviceName = '—';
+  String _deviceId = '—';
+  final String _deviceModel = '—'; // tiada sumber (telefon, bukan RTU)
+  final String _firmwareVersion = '—'; // tiada sumber
+  String _agencyName = '—';
+  String _agencyCode = '—';
+  String _agencyToken = '—';
+  final String _registeredAt = '—'; // tiada sumber (storage tak simpan)
+  String _appVersion = '—';
+  String _flutterVersion = '—';
+
+  bool _isSyncing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadInfo();
+  }
+
+  Future<void> _loadInfo() async {
+    final storage = LocalStorageService();
+    final info = await storage.getDeviceInfo();
+    final agencyName = await storage.getAgencyName();
+    final agencyCode = await storage.getAgencyCode();
+    final agencyToken = await storage.getAgencyToken();
+    final deviceId = await DeviceIdentityService().getDeviceId();
+
+    String appVer = '—';
+    try {
+      final pkg = await PackageInfo.fromPlatform();
+      appVer = '${pkg.version} (build ${pkg.buildNumber})';
+    } catch (_) {}
+
+    if (!mounted) return;
+    setState(() {
+      _deviceName = (info?['name']?.isNotEmpty == true) ? info!['name']! : '—';
+      _deviceId = deviceId.isNotEmpty ? deviceId : '—';
+      _agencyName = (agencyName != null && agencyName.isNotEmpty)
+          ? agencyName
+          : '—';
+      _agencyCode = (agencyCode != null && agencyCode.isNotEmpty)
+          ? agencyCode
+          : '—';
+      _agencyToken = (agencyToken != null && agencyToken.isNotEmpty)
+          ? _maskToken(agencyToken)
+          : '—';
+      _appVersion = appVer;
+      _flutterVersion = 'Flutter (lihat About)';
+    });
+  }
+
+  // Tutup sebahagian token untuk paparan.
+  String _maskToken(String token) {
+    if (token.length <= 8) return '••••';
+    return '${token.substring(0, 4)}••••••••${token.substring(token.length - 4)}';
+  }
+
+  Future<void> _syncFromBackend() async {
+    setState(() => _isSyncing = true);
+    final ok = await RegistrationService().restoreFromBackend();
+    if (!mounted) return;
+    if (ok) {
+      await _loadInfo(); // muat semula nilai terkini dari storage
+    }
+    setState(() => _isSyncing = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? 'Data diselaras dari pelayan'
+              : 'Sync gagal — semak sambungan / pendaftaran',
+        ),
+        backgroundColor: ok ? AppTheme.success : Colors.orange,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
 
   @override
   void dispose() {
@@ -118,6 +191,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
         actions: [
+          _isSyncing
+              ? const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16),
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              : IconButton(
+                  onPressed: _syncFromBackend,
+                  icon: CustomIconWidget(
+                    iconName: 'sync',
+                    color: theme.colorScheme.primary,
+                    size: 22,
+                  ),
+                  tooltip: 'Sync data dari pelayan',
+                ),
           _isSaving
               ? const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 16),
