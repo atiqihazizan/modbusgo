@@ -32,7 +32,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   // Data sebenar dari storage
-  String _deviceName = 'M.ATIQI';
+  String _deviceName = '-';
   String _deviceId = '—';
   String _agencyName = '—';
   String _agencyCode = '—';
@@ -244,7 +244,7 @@ class _HomeScreenState extends State<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _deviceName,
+                  _deviceName.toUpperCase(),
                   style: theme.textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
@@ -296,9 +296,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   UnifiedDashboardCardWidget(
                     deviceId: _deviceId,
-                    agencyCode: _agencyCode,
+                    agencyCode: _agencyCode.toUpperCase(),
                     coordinates: _coordinates,
-                    agencyName: _agencyName,
+                    agencyName: _agencyName.toUpperCase(),
                     onRefreshGps: _onRefreshGps,
                     onManualEmit: _onManualEmit,
                     isEmitting: _isEmitting,
