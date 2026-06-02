@@ -213,57 +213,63 @@ class _StatusBar extends StatelessWidget {
         ),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: Row(
-        children: [
-          // GPS coordinates
-          CustomIconWidget(
-            iconName: 'location_on',
-            color: Colors.white70,
-            size: 14,
-          ),
-          const SizedBox(width: 4),
-          Text(
-            coordinates.isNotEmpty ? coordinates : 'N/A',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              fontFeatures: [FontFeature.tabularFigures()],
-            ),
-          ),
-          const SizedBox(width: 14),
-          // Connection dot + label
-          Container(
-            width: 7,
-            height: 7,
-            decoration: BoxDecoration(
-              color: connectionColor,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 5),
-          Text(
-            '$connectionLabel · $motionLabel',
-            style: const TextStyle(
+      // Zoom out: kecilkan kandungan automatik kalau tak cukup ruang.
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: Row(
+          mainAxisSize: MainAxisSize.min, // penting dalam FittedBox
+          children: [
+            // GPS coordinates
+            CustomIconWidget(
+              iconName: 'location_on',
               color: Colors.white70,
-              fontSize: 9,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.4,
+              size: 14,
             ),
-          ),
-          const Spacer(),
-          // Speed / last emit
-          CustomIconWidget(iconName: 'speed', color: Colors.white54, size: 14),
-          const SizedBox(width: 4),
-          Text(
-            lastEmit.isNotEmpty ? lastEmit : 'N/A · 0 km/h',
-            style: const TextStyle(
-              color: Colors.white54,
-              fontSize: 9,
-              fontWeight: FontWeight.w500,
+            const SizedBox(width: 4),
+            Text(
+              coordinates.isNotEmpty ? coordinates : 'N/A',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
             ),
-          ),
-        ],
+            const SizedBox(width: 14),
+            // Connection dot + label
+            Container(
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(
+                color: connectionColor,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 5),
+            Text(
+              '$connectionLabel · $motionLabel',
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 9,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.4,
+              ),
+            ),
+            const SizedBox(width: 16), // ganti Spacer() — FittedBox tak boleh Spacer
+            // Speed / last emit
+            CustomIconWidget(iconName: 'speed', color: Colors.white54, size: 14),
+            const SizedBox(width: 4),
+            Text(
+              lastEmit.isNotEmpty ? lastEmit : 'N/A · 0 km/h',
+              style: const TextStyle(
+                color: Colors.white54,
+                fontSize: 9,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
