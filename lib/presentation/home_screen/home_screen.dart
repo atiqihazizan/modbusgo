@@ -279,11 +279,11 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(
             onPressed: () => context.push(AppRoutes.settingsScreen),
             icon: CustomIconWidget(
-              iconName: 'settings',
+              iconName: 'account_circle',
               color: theme.colorScheme.onSurface,
               size: 22,
             ),
-            tooltip: 'Settings',
+            tooltip: 'Info',
           ),
           const SizedBox(width: 4),
         ],
