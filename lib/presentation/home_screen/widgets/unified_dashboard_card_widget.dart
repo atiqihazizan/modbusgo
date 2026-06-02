@@ -152,6 +152,7 @@ class _AgencyRow extends StatelessWidget {
                   agencyCode.isNotEmpty ? agencyCode.toUpperCase() : '-',
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
+                    fontSize: 9,
                   ),
                 ),
               ],

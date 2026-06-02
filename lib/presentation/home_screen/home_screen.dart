@@ -7,7 +7,6 @@ import '../../core/services/device_identity_service.dart';
 import '../../core/services/local_storage_service.dart';
 import '../../core/services/location_service.dart';
 import '../../core/services/mqtt_service.dart';
-import './widgets/home_action_bar_widget.dart';
 import './widgets/modbus_device_panel_widget.dart';
 import './widgets/unified_dashboard_card_widget.dart';
 
