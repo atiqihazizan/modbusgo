@@ -32,7 +32,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   // Data sebenar dari storage
-  String _deviceName = '—';
+  String _deviceName = 'M.ATIQI';
   String _deviceId = '—';
   String _agencyName = '—';
   String _agencyCode = '—';
@@ -238,22 +238,8 @@ class _HomeScreenState extends State<HomeScreen> {
         title: Row(
           children: [
             // GO logo — transparent background
-            SizedBox(
-              width: 36,
-              height: 36,
-              child: Image.asset(
-                fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => Center(
-                  child: CustomIconWidget(
-                    iconName: 'memory',
-                    color: AppTheme.primary,
-                    size: 20,
-                  ),
-                ),
-                "assets/images/app_icon-1780309918034-removebg-preview-1780371862334.png",
-              ),
-            ),
-            const SizedBox(width: 10),
+            // SizedBox(width: 36, height: 36, child: SizedBox()),
+            // const SizedBox(width: 10),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
