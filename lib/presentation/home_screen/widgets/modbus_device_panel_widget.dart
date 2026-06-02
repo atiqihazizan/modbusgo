@@ -72,37 +72,37 @@ class ModbusRegisterValue {
 
 // Mock initial data
 final _initialDevices = [
-  ModbusDevice(
-    id: 'dev-1',
-    name: 'RTU Sensor A',
-    address: '192.168.1.101',
-    connectionType: ModbusConnectionType.wifi,
-    isConnected: true,
-    slaveId: 1,
-    functionCode: 'FC03',
-    dataType: 'INT16',
-    byteOrder: 'Big Endian',
-    registerValues: [
-      ModbusRegisterValue(address: '0x0001', value: '1024', unit: 'raw'),
-      ModbusRegisterValue(address: '0x0002', value: '23.5', unit: '°C'),
-      ModbusRegisterValue(address: '0x0003', value: '65', unit: '%'),
-    ],
-  ),
-  ModbusDevice(
-    id: 'dev-2',
-    name: 'BT Module B',
-    address: 'AA:BB:CC:DD:EE:FF',
-    connectionType: ModbusConnectionType.bluetooth,
-    isConnected: true,
-    slaveId: 2,
-    functionCode: 'FC04',
-    dataType: 'FLOAT32',
-    byteOrder: 'Little Endian',
-    registerValues: [
-      ModbusRegisterValue(address: '0x0010', value: '512', unit: 'raw'),
-      ModbusRegisterValue(address: '0x0011', value: '4.95', unit: 'V'),
-    ],
-  ),
+  // ModbusDevice(
+  //   id: 'dev-1',
+  //   name: 'RTU Sensor A',
+  //   address: '192.168.1.101',
+  //   connectionType: ModbusConnectionType.wifi,
+  //   isConnected: true,
+  //   slaveId: 1,
+  //   functionCode: 'FC03',
+  //   dataType: 'INT16',
+  //   byteOrder: 'Big Endian',
+  //   registerValues: [
+  //     ModbusRegisterValue(address: '0x0001', value: '1024', unit: 'raw'),
+  //     ModbusRegisterValue(address: '0x0002', value: '23.5', unit: '°C'),
+  //     ModbusRegisterValue(address: '0x0003', value: '65', unit: '%'),
+  //   ],
+  // ),
+  // ModbusDevice(
+  //   id: 'dev-2',
+  //   name: 'BT Module B',
+  //   address: 'AA:BB:CC:DD:EE:FF',
+  //   connectionType: ModbusConnectionType.bluetooth,
+  //   isConnected: true,
+  //   slaveId: 2,
+  //   functionCode: 'FC04',
+  //   dataType: 'FLOAT32',
+  //   byteOrder: 'Little Endian',
+  //   registerValues: [
+  //     ModbusRegisterValue(address: '0x0010', value: '512', unit: 'raw'),
+  //     ModbusRegisterValue(address: '0x0011', value: '4.95', unit: 'V'),
+  //   ],
+  // ),
 ];
 
 class ModbusDevicePanelWidget extends StatefulWidget {
@@ -115,7 +115,8 @@ class ModbusDevicePanelWidget extends StatefulWidget {
 
 class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget> {
   List<ModbusDevice> _devices = List.from(_initialDevices);
-  final Set<String> _expandedIds = {'dev-1'};
+  // final Set<String> _expandedIds = {'dev-1'};
+  final Set<String> _expandedIds = {};
   ModbusConnectionType? _filterType; // null = all
 
   List<ModbusDevice> get _filteredDevices {

@@ -102,10 +102,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   String _fmtCoords(double lat, double lon) {
-    final latDir = lat >= 0 ? 'N' : 'S';
-    final lonDir = lon >= 0 ? 'E' : 'W';
-    return '${lat.abs().toStringAsFixed(4)}° $latDir, '
-        '${lon.abs().toStringAsFixed(4)}° $lonDir';
+    return '${lat.abs().toStringAsFixed(4)}, ${lon.abs().toStringAsFixed(4)}';
+    // final latDir = lat >= 0 ? 'N' : 'S';
+    // final lonDir = lon >= 0 ? 'E' : 'W';
+    // return '${lat.abs().toStringAsFixed(4)}° $latDir, '
+    //     '${lon.abs().toStringAsFixed(4)}° $lonDir';
   }
 
   Future<void> _onRefresh() async {
