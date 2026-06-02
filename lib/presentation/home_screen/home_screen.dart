@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/app_export.dart';
 import '../../core/services/device_identity_service.dart';
+import '../../core/services/local_storage_service.dart';
 import '../../core/services/location_service.dart';
 import '../../core/services/mqtt_service.dart';
 import './widgets/agency_header_bar_widget.dart';
@@ -9,18 +12,6 @@ import './widgets/device_info_card_widget.dart';
 import './widgets/home_action_bar_widget.dart';
 import './widgets/modbus_device_panel_widget.dart';
 import './widgets/tracking_status_bar_widget.dart';
-
-// Mock data — TODO: Replace with [Riverpod/Bloc] for production
-class _MockHomeState {
-  static const String deviceName = 'RTU-UNIT-04';
-  static const String deviceId = 'MBG-2024-0047';
-  static const String agencyName = 'Jabatan Pengairan Selangor';
-  static const String agencyCode = 'JPS-SEL';
-  static bool isOnline = true;
-  static bool isMoving = false;
-  static String lastEmit = '2 min ago';
-  static String lastCoordinates = '3.1390° N, 101.6869° E';
-}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -30,35 +21,98 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final bool _isOnline = _MockHomeState.isOnline;
-  final bool _isMoving = _MockHomeState.isMoving;
-  String _lastEmit = _MockHomeState.lastEmit;
+  // Data sebenar dari storage
+  String _deviceName = '—';
+  String _deviceId = '—';
+  String _agencyName = '—';
+  String _agencyCode = '—';
+
+  // Status hidup
+  bool _isOnline = false;
+  bool _isMoving = false;
+  String _lastEmit = 'Belum dihantar';
+  String _coordinates = '—';
+
   bool _isRefreshing = false;
   bool _isEmitting = false;
+
+  StreamSubscription<LocationFix>? _locSub;
 
   @override
   void initState() {
     super.initState();
-    // Mula GPS di latar — tak block UI. Fix akan masuk bila sedia.
-    LocationService().start();
+    _loadDeviceInfo();
+    _startLocation();
+  }
+
+  @override
+  void dispose() {
+    _locSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadDeviceInfo() async {
+    final storage = LocalStorageService();
+    final info = await storage.getDeviceInfo();
+    final agencyName = await storage.getAgencyName();
+    final agencyCode = await storage.getAgencyCode();
+    if (!mounted) return;
+    setState(() {
+      _deviceName =
+          (info?['name']?.isNotEmpty == true) ? info!['name']! : '—';
+      _deviceId =
+          (info?['device_id']?.isNotEmpty == true) ? info!['device_id']! : '—';
+      _agencyName =
+          (agencyName != null && agencyName.isNotEmpty) ? agencyName : '—';
+      _agencyCode =
+          (agencyCode != null && agencyCode.isNotEmpty) ? agencyCode : '—';
+    });
+  }
+
+  Future<void> _startLocation() async {
+    // Mula GPS di latar — tak block UI.
+    await LocationService().start();
+
+    // Dengar fix masuk → kemas kini koordinat + status motion.
+    _locSub = LocationService().stream.listen((fix) {
+      if (!mounted) return;
+      setState(() {
+        _coordinates = _fmtCoords(fix.latitude, fix.longitude);
+        _isMoving = fix.speed > 0.5; // ambang gerak (m/s)
+      });
+    });
+
+    // Papar fix awal kalau dah ada.
+    final f = LocationService().lastFix;
+    if (f != null && mounted) {
+      setState(() => _coordinates = _fmtCoords(f.latitude, f.longitude));
+    }
+  }
+
+  String _fmtCoords(double lat, double lon) {
+    final latDir = lat >= 0 ? 'N' : 'S';
+    final lonDir = lon >= 0 ? 'E' : 'W';
+    return '${lat.abs().toStringAsFixed(4)}° $latDir, '
+        '${lon.abs().toStringAsFixed(4)}° $lonDir';
   }
 
   Future<void> _onRefresh() async {
     setState(() => _isRefreshing = true);
-    // TODO: connect real logic — refresh GPS and device status
-    await Future.delayed(const Duration(seconds: 1));
-    if (mounted) {
+    await _loadDeviceInfo();
+    final fix = await LocationService().getCurrentFix();
+    if (mounted && fix != null) {
       setState(() {
-        _isRefreshing = false;
-        _lastEmit = 'Just now';
+        _coordinates = _fmtCoords(fix.latitude, fix.longitude);
+        _isMoving = fix.speed > 0.5;
       });
+    }
+    if (mounted) {
+      setState(() => _isRefreshing = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Status refreshed'),
+          content: const Text('Status dikemas kini'),
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           duration: const Duration(seconds: 2),
         ),
       );
@@ -86,7 +140,7 @@ class _HomeScreenState extends State<HomeScreen> {
       await Future.delayed(const Duration(seconds: 2)); // beri masa connect
     }
 
-    // Guna fix GPS sebenar kalau ada; kalau belum sedia, guna last/abai.
+    // Guna fix GPS sebenar kalau ada.
     final fix = LocationService().lastFix;
     mqtt.publishBundle({
       'data_type': 'MG',
@@ -98,16 +152,21 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     if (mounted) {
+      final last = LocationService().lastFix;
       setState(() {
         _isEmitting = false;
-        _lastEmit = 'Just now';
+        _isOnline = mqtt.isConnected;
+        _lastEmit = 'Baru sahaja';
+        if (last != null) {
+          _coordinates = _fmtCoords(last.latitude, last.longitude);
+        }
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             mqtt.isConnected
-                ? 'Tracking data emitted'
-                : 'Offline — data queued',
+                ? 'Data tracking dihantar'
+                : 'Luar talian — data beratur',
           ),
           backgroundColor: mqtt.isConnected ? AppTheme.success : Colors.orange,
           behavior: SnackBarBehavior.floating,
@@ -121,17 +180,27 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _onRefreshGps() async {
-    // TODO: connect real logic — refresh GPS coordinates
-    await Future.delayed(const Duration(milliseconds: 800));
-    if (mounted) {
+    final fix = await LocationService().getCurrentFix();
+    if (!mounted) return;
+    if (fix != null) {
+      setState(() {
+        _coordinates = _fmtCoords(fix.latitude, fix.longitude);
+        _isMoving = fix.speed > 0.5;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('GPS refreshed'),
+          content: const Text('GPS dikemas kini'),
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           duration: const Duration(seconds: 2),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('GPS tidak tersedia. Hidupkan GPS & benarkan lokasi.'),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
         ),
       );
     }
@@ -172,13 +241,13 @@ class _HomeScreenState extends State<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _MockHomeState.deviceName,
+                  _deviceName,
                   style: theme.textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
                 ),
                 Text(
-                  _MockHomeState.deviceId,
+                  _deviceId,
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -223,14 +292,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
                 children: [
                   DeviceInfoCardWidget(
-                    deviceId: _MockHomeState.deviceId,
-                    agencyCode: _MockHomeState.agencyCode,
-                    coordinates: _MockHomeState.lastCoordinates,
+                    deviceId: _deviceId,
+                    agencyCode: _agencyCode,
+                    coordinates: _coordinates,
                   ),
                   const SizedBox(height: 12),
                   AgencyHeaderBarWidget(
-                    agencyName: _MockHomeState.agencyName,
-                    agencyCode: _MockHomeState.agencyCode,
+                    agencyName: _agencyName,
+                    agencyCode: _agencyCode,
                     onRefreshGps: _onRefreshGps,
                     onManualEmit: _onManualEmit,
                     isEmitting: _isEmitting,
