@@ -267,15 +267,15 @@ class _HomeScreenState extends State<HomeScreen> {
         //   ],
         // ),
         actions: [
-          IconButton(
-            onPressed: () => context.push(AppRoutes.qrScannerScreen),
-            icon: CustomIconWidget(
-              iconName: 'qr_code_scanner',
-              color: theme.colorScheme.onSurface,
-              size: 22,
-            ),
-            tooltip: 'Scan QR',
-          ),
+          // IconButton(
+          //   onPressed: () => context.push(AppRoutes.qrScannerScreen),
+          //   icon: CustomIconWidget(
+          //     iconName: 'qr_code_scanner',
+          //     color: theme.colorScheme.onSurface,
+          //     size: 22,
+          //   ),
+          //   tooltip: 'Scan QR',
+          // ),
           IconButton(
             onPressed: () => context.push(AppRoutes.settingsScreen),
             icon: CustomIconWidget(
