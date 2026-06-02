@@ -17,23 +17,23 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
   String _mapProvisionError(ProvisionError error) {
     switch (error) {
       case ProvisionError.invalidLink:
-        return 'Kod QR tidak sah.';
+        return 'Invalid QR code.';
       case ProvisionError.network:
-        return 'Tiada sambungan internet. Cuba lagi.';
+        return 'No internet connection. Please try again.';
       case ProvisionError.decryptionFailed:
-        return 'Kod QR rosak atau tidak sah.';
+        return 'QR code is corrupted or invalid.';
       case ProvisionError.payloadExpired:
-        return 'Kod QR telah tamat tempoh. Minta kod baru.';
+        return 'QR code has expired. Request a new one.';
       case ProvisionError.agencyNotFound:
-        return 'Agensi tidak dijumpai.';
+        return 'Agency not found.';
       case ProvisionError.agencyInactive:
-        return 'Agensi tidak aktif.';
+        return 'Agency is inactive.';
       case ProvisionError.tokenExpired:
-        return 'Token agensi telah tamat tempoh. Minta kod baru.';
+        return 'Agency token has expired. Request a new code.';
       case ProvisionError.nonceMismatch:
-        return 'Kod QR tidak padan. Minta kod baru.';
+        return 'QR code mismatch. Request a new code.';
       case ProvisionError.unknown:
-        return 'Ralat tidak dijangka. Cuba lagi.';
+        return 'Unexpected error. Please try again.';
     }
   }
 
@@ -78,7 +78,9 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
       }
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pendaftaran peranti gagal. Cuba lagi.')),
+        const SnackBar(
+          content: Text('Device registration failed. Please try again.'),
+        ),
       );
     }
   }
@@ -89,22 +91,22 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        title: const Text('Nama Peranti'),
+        title: const Text('Device Name'),
         content: TextField(
           controller: controller,
           autofocus: true,
-          decoration: const InputDecoration(hintText: 'Masukkan nama peranti'),
+          decoration: const InputDecoration(hintText: 'Enter device name'),
           textCapitalization: TextCapitalization.words,
           onSubmitted: (v) => Navigator.of(ctx).pop(v),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(null),
-            child: const Text('Batal'),
+            child: const Text('Cancel'),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(controller.text),
-            child: const Text('Simpan'),
+            child: const Text('Save'),
           ),
         ],
       ),
@@ -148,7 +150,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  'Peruntukan Peranti',
+                  'Device Provisioning',
                   style: theme.textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.bold,
                     color: theme.colorScheme.onSurface,
@@ -157,7 +159,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'Imbas kod QR peruntukan daripada pentadbir anda untuk mendaftarkan peranti ini.',
+                  'Scan the provisioning QR code from your administrator to register this device.',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -172,7 +174,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            'Memproses…',
+                            'Processing…',
                             style: theme.textTheme.bodyMedium?.copyWith(
                               color: theme.colorScheme.onSurfaceVariant,
                             ),
@@ -185,7 +187,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
                         child: ElevatedButton.icon(
                           onPressed: _onScanPressed,
                           icon: const Icon(Icons.qr_code_scanner),
-                          label: const Text('Imbas QR'),
+                          label: const Text('Scan QR'),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: theme.colorScheme.primary,
                             foregroundColor: theme.colorScheme.onPrimary,
