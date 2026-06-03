@@ -24,6 +24,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _agencyToken = '';
   bool _isOnline = false;
   bool _isLoading = true;
+  // ── Reload agency data ──
+  bool _isReloadingAgency = false;
 
   // ── Agency list / switch ──
   List<AgencyOption> _agencies = [];
@@ -74,6 +76,51 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _agencies = agencies;
         _isLoading = false;
       });
+    }
+  }
+
+  /// Reload agency data dari backend → simpan ke storage → refresh UI.
+  Future<void> _reloadAgency() async {
+    setState(() => _isReloadingAgency = true);
+
+    final ok = await RegistrationService().restoreFromBackend();
+
+    if (!mounted) return;
+
+    if (ok) {
+      final storage = LocalStorageService();
+      final agencyName = await storage.getAgencyName();
+      final agencyCode = await storage.getAgencyCode();
+      final agencyToken = await storage.getAgencyToken();
+      if (!mounted) return;
+      setState(() {
+        _agencyName = (agencyName != null && agencyName.isNotEmpty)
+            ? agencyName
+            : '-';
+        _agencyCode = (agencyCode != null && agencyCode.isNotEmpty)
+            ? agencyCode
+            : '-';
+        _agencyToken = agencyToken ?? '';
+        _isReloadingAgency = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Agency data updated'),
+          backgroundColor: AppTheme.success,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } else {
+      setState(() => _isReloadingAgency = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Reload failed — check connection'),
+          backgroundColor: AppTheme.errorColor,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
     }
   }
 
@@ -467,12 +514,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: AppTheme.primary.withAlpha(77)),
                   ),
+                  //
                   child: Text(
                     _agencyCode,
                     style: GoogleFonts.sourceCodePro(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
                       color: AppTheme.primary,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Reload agency data button
+                InkWell(
+                  onTap: _isReloadingAgency ? null : _reloadAgency,
+                  borderRadius: BorderRadius.circular(18),
+                  child: Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: const Color(0xFFCBD5E1)),
+                    ),
+                    child: Center(
+                      child: _isReloadingAgency
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppTheme.primary,
+                              ),
+                            )
+                          : const CustomIconWidget(
+                              iconName: 'refresh',
+                              size: 18,
+                              color: Color(0xFF64748B),
+                            ),
                     ),
                   ),
                 ),
