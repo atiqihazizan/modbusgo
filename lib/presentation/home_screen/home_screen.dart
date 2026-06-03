@@ -7,9 +7,10 @@ import '../../core/services/device_identity_service.dart';
 import '../../core/services/local_storage_service.dart';
 import '../../core/services/location_service.dart';
 import '../../core/services/mqtt_service.dart';
+import '../../core/services/publish_service.dart';
+import '../../core/services/registration_service.dart';
 import './widgets/modbus_device_panel_widget.dart';
 import './widgets/unified_dashboard_card_widget.dart';
-import '../../core/services/registration_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -136,10 +137,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       setState(() {
         _coordinates = _fmtCoords(fix.latitude, fix.longitude);
-        _isMoving = fix.speed > 0.5; // motion threshold (m/s)
+        _isMoving = fix.speed > 0.5;
       });
-      // WAJIB: setiap lat/lon berubah → terus publish (tak kira sensor).
-      _autoPublish(fix);
+      // SEBELUM: _autoPublish(fix);
+      PublishService().publishGps(fix); // pintu tunggal + hormati pause
     });
 
     // Show initial fix if already available.

@@ -33,6 +33,7 @@ dependencies:
   package_info_plus: ^8.1.2      # Read app version and build number from platform
 
 
+  flutter_blue_plus: ^1.32.12
 dev_dependencies:
   flutter_test:    # CRITICAL: Required for Flutter project testing - DO NOT REMOVE
     sdk: flutter   # CRITICAL: Required for Flutter project testing - DO NOT REMOVE

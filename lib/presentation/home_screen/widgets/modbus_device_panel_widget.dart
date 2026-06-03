@@ -16,6 +16,8 @@ class ModbusDevice {
   final String functionCode;
   final String dataType;
   final String byteOrder;
+  final int startAddress; // ← TAMBAH
+  final int registerCount; // ← TAMBAH
   final List<ModbusRegisterValue> registerValues;
 
   const ModbusDevice({
@@ -28,6 +30,8 @@ class ModbusDevice {
     required this.functionCode,
     required this.dataType,
     required this.byteOrder,
+    this.startAddress = 0, // ← TAMBAH
+    this.registerCount = 2, // ← TAMBAH
     this.registerValues = const [],
   });
 
@@ -42,6 +46,8 @@ class ModbusDevice {
     String? dataType,
     String? byteOrder,
     List<ModbusRegisterValue>? registerValues,
+    int? startAddress,
+    int? registerCount,
   }) {
     return ModbusDevice(
       id: id ?? this.id,
@@ -54,6 +60,8 @@ class ModbusDevice {
       dataType: dataType ?? this.dataType,
       byteOrder: byteOrder ?? this.byteOrder,
       registerValues: registerValues ?? this.registerValues,
+      startAddress: startAddress ?? this.startAddress,
+      registerCount: registerCount ?? this.registerCount,
     );
   }
 }
@@ -157,6 +165,8 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget> {
           functionCode: result['functionCode'] as String,
           dataType: result['dataType'] as String,
           byteOrder: result['byteOrder'] as String,
+          startAddress: result['startAddress'] as int,
+          registerCount: result['registerCount'] as int,
           registerValues: const [],
         ),
       ];
@@ -195,6 +205,8 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget> {
             functionCode: result['functionCode'] as String,
             dataType: result['dataType'] as String,
             byteOrder: result['byteOrder'] as String,
+            startAddress: result['startAddress'] as int,
+            registerCount: result['registerCount'] as int,
           );
         }
         return d;
@@ -910,6 +922,14 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
 
   bool get _isWifi => widget.connectionType == ModbusConnectionType.wifi;
 
+  int _parseAddr(String s) {
+    final t = s.trim();
+    if (t.toLowerCase().startsWith('0x')) {
+      return int.tryParse(t.substring(2), radix: 16) ?? 0;
+    }
+    return int.tryParse(t) ?? 0;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -951,6 +971,8 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
       'functionCode': _selectedFunctionCode,
       'dataType': _selectedDataType,
       'byteOrder': _selectedByteOrder,
+      'startAddress': _parseAddr(_startAddrCtrl.text), // ← TAMBAH
+      'registerCount': int.tryParse(_lengthCtrl.text) ?? 2, // ← TAMBAH
     });
   }
 
