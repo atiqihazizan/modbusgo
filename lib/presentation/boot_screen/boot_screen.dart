@@ -13,32 +13,32 @@ class BootScreen extends StatefulWidget {
   State<BootScreen> createState() => _BootScreenState();
 }
 
-class _BootScreenState extends State<BootScreen>
-    with SingleTickerProviderStateMixin {
+class _BootScreenState extends State<BootScreen> {
+  static const Duration _minBootVisible = Duration(milliseconds: 1400);
+
   final bool _isLoading = true;
   String _statusMessage = 'Starting…';
-
-  late AnimationController _bgController;
-  late Animation<double> _bgAnimation;
+  late final DateTime _bootStartedAt;
 
   @override
   void initState() {
     super.initState();
-    _bgController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 800),
-    )..forward();
-    _bgAnimation = CurvedAnimation(
-      parent: _bgController,
-      curve: Curves.easeOutCubic,
-    );
+    _bootStartedAt = DateTime.now();
     _runBootSequence();
   }
 
-  @override
-  void dispose() {
-    _bgController.dispose();
-    super.dispose();
+  Future<void> _waitMinBootVisible() async {
+    final elapsed = DateTime.now().difference(_bootStartedAt);
+    final remaining = _minBootVisible - elapsed;
+    if (remaining > Duration.zero) {
+      await Future<void>.delayed(remaining);
+    }
+  }
+
+  Future<void> _navigateAfterBoot(String route) async {
+    await _waitMinBootVisible();
+    if (!mounted) return;
+    context.go(route);
   }
 
   Future<void> _runBootSequence() async {
@@ -55,7 +55,7 @@ class _BootScreenState extends State<BootScreen>
       if (hasDevice && hasToken) {
         final needApproval = await storage.getNeedApproval();
         if (!mounted) return;
-        context.go(
+        await _navigateAfterBoot(
           needApproval ? AppRoutes.pendingScreen : AppRoutes.homeScreen,
         );
         return;
@@ -68,14 +68,14 @@ class _BootScreenState extends State<BootScreen>
       if (restored) {
         final needApproval = await storage.getNeedApproval();
         if (!mounted) return;
-        context.go(
+        await _navigateAfterBoot(
           needApproval ? AppRoutes.pendingScreen : AppRoutes.homeScreen,
         );
       } else {
-        context.go(AppRoutes.provisionScreen);
+        await _navigateAfterBoot(AppRoutes.provisionScreen);
       }
     } catch (_) {
-      if (mounted) context.go(AppRoutes.provisionScreen);
+      if (mounted) await _navigateAfterBoot(AppRoutes.provisionScreen);
     }
   }
 
@@ -87,52 +87,47 @@ class _BootScreenState extends State<BootScreen>
     return PopScope(
       canPop: false,
       child: Scaffold(
-        body: AnimatedBuilder(
-          animation: _bgAnimation,
-          builder: (context, child) =>
-              Opacity(opacity: _bgAnimation.value, child: child),
-          child: Container(
-            width: double.infinity,
-            height: double.infinity,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  theme.colorScheme.primary.withAlpha(20),
-                  theme.colorScheme.surface,
-                  theme.colorScheme.secondaryContainer.withAlpha(38),
-                ],
-              ),
+        body: Container(
+          width: double.infinity,
+          height: double.infinity,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                theme.colorScheme.primary.withAlpha(20),
+                theme.colorScheme.surface,
+                theme.colorScheme.secondaryContainer.withAlpha(38),
+              ],
             ),
-            child: SafeArea(
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxWidth: size.width > 600 ? 480 : double.infinity,
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 28),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Spacer(flex: 2),
-                        SplashLogoWidget(isLoading: _isLoading),
-                        const SizedBox(height: 32),
-                        _StatusMessageWidget(
-                          message: _statusMessage,
-                          isLoading: _isLoading,
+          ),
+          child: SafeArea(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: size.width > 600 ? 480 : double.infinity,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 28),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Spacer(flex: 2),
+                      SplashLogoWidget(isLoading: _isLoading),
+                      const SizedBox(height: 32),
+                      _StatusMessageWidget(
+                        message: _statusMessage,
+                        isLoading: _isLoading,
+                      ),
+                      const Spacer(flex: 3),
+                      Text(
+                        'ModbusGo v1.0.0',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
-                        const Spacer(flex: 3),
-                        Text(
-                          'ModbusGo v1.0.0',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                   ),
                 ),
               ),

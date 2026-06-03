@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Sama dengan AppTheme.surfaceLight — lancar ke BootScreen Flutter -->
+    <color name="boot_surface">#FFF8FAFC</color>
+</resources>

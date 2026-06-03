@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sizer/sizer.dart';
@@ -26,12 +28,12 @@ void main() async {
   };
 
   // 🚨 CRITICAL: Device orientation lock - DO NOT REMOVE
-  Future.wait([
+  // Jangan tangguh runApp — tangguhan = native splash lebih lama, BootScreen tak nampak.
+  unawaited(
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]),
-  ]).then((value) {
-    GoRouter.optionURLReflectsImperativeAPIs = true;
-    runApp(MyApp());
-  });
+  );
+  GoRouter.optionURLReflectsImperativeAPIs = true;
+  runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
