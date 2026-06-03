@@ -2,6 +2,19 @@ import 'package:flutter/material.dart';
 
 import '../../../core/app_export.dart';
 
+String _coordinatesDisplay(String coordinates) {
+  final trimmed = coordinates.trim();
+  if (trimmed.isEmpty || trimmed == '—' || trimmed == 'N/A') {
+    return 'N/A';
+  }
+  final parts = trimmed.split(',');
+  if (parts.length != 2) return trimmed;
+  final lat = double.tryParse(parts[0].trim());
+  final lon = double.tryParse(parts[1].trim());
+  if (lat == null || lon == null) return trimmed;
+  return '${lat.abs().toStringAsFixed(4)}, ${lon.abs().toStringAsFixed(4)}';
+}
+
 class UnifiedDashboardCardWidget extends StatelessWidget {
   // Device info
   final String deviceId;
@@ -148,6 +161,7 @@ class _AgencyRow extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
+                const SizedBox(height: 4),
                 Text(
                   agencyCode.isNotEmpty ? agencyCode.toUpperCase() : '-',
                   style: theme.textTheme.labelSmall?.copyWith(
@@ -199,6 +213,7 @@ class _StatusBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final motionLabel = isMoving ? 'MOVING' : 'IDLE';
     final connectionLabel = isOnline ? 'ONLINE' : 'OFFLINE';
     final connectionColor = isOnline ? AppTheme.success : AppTheme.errorColor;
@@ -212,7 +227,7 @@ class _StatusBar extends StatelessWidget {
           bottomRight: Radius.circular(12.0),
         ),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
       // Zoom out: kecilkan kandungan automatik kalau tak cukup ruang.
       child: FittedBox(
         fit: BoxFit.scaleDown,
@@ -224,14 +239,14 @@ class _StatusBar extends StatelessWidget {
             CustomIconWidget(
               iconName: 'location_on',
               color: Colors.white70,
-              size: 14,
+              size: 12,
             ),
             const SizedBox(width: 4),
             Text(
-              coordinates.isNotEmpty ? coordinates : 'N/A',
-              style: const TextStyle(
+              _coordinatesDisplay(coordinates),
+              style: theme.textTheme.labelSmall?.copyWith(
                 color: Colors.white,
-                fontSize: 12,
+                fontSize: 9,
                 fontWeight: FontWeight.w500,
                 fontFeatures: [FontFeature.tabularFigures()],
               ),
@@ -246,22 +261,24 @@ class _StatusBar extends StatelessWidget {
                 shape: BoxShape.circle,
               ),
             ),
-            const SizedBox(width: 5),
+            const SizedBox(width: 8),
             Text(
-              '$connectionLabel · $motionLabel',
-              style: const TextStyle(
+              '${connectionLabel.toUpperCase()} · ${motionLabel.toUpperCase()}',
+              textAlign: TextAlign.left,
+              style: theme.textTheme.labelSmall?.copyWith(
                 color: Colors.white70,
-                fontSize: 9,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.4,
+                fontSize: 8,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.8,
               ),
             ),
-            const SizedBox(width: 16), // ganti Spacer() — FittedBox tak boleh Spacer
+            const SizedBox(width: 24),
             // Speed / last emit
             CustomIconWidget(iconName: 'speed', color: Colors.white54, size: 14),
             const SizedBox(width: 4),
             Text(
               lastEmit.isNotEmpty ? lastEmit : 'N/A · 0 km/h',
+              textAlign: TextAlign.right,
               style: const TextStyle(
                 color: Colors.white54,
                 fontSize: 9,

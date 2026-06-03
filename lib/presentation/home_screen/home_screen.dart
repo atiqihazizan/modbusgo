@@ -333,7 +333,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 maxWidth: isTablet ? 640 : double.infinity,
               ),
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
                 children: [
                   UnifiedDashboardCardWidget(
                     deviceId: _deviceId,
