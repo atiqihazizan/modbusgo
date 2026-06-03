@@ -8,6 +8,8 @@ import '../presentation/profile_screen/profile_screen.dart';
 import '../presentation/provision_screen/provision_screen.dart';
 import '../presentation/scanner_screen/scanner_screen.dart';
 import '../presentation/pending_screen/pending_screen.dart';
+import '../presentation/modbus_transmission_screen/modbus_transmission_screen.dart';
+import '../presentation/home_screen/widgets/modbus_device_panel_widget.dart';
 
 class AppRoutes {
   static const String initial = '/';
@@ -19,6 +21,7 @@ class AppRoutes {
   static const String provisionScreen = '/provision';
   static const String scannerScreen = '/scan';
   static const String pendingScreen = '/pending';
+  static const String modbusTransmissionScreen = '/modbus-transmission';
 }
 
 final GoRouter appRouter = GoRouter(
@@ -206,6 +209,32 @@ final GoRouter appRouter = GoRouter(
         },
         transitionDuration: const Duration(milliseconds: 280),
       ),
+    ),
+    GoRoute(
+      path: AppRoutes.modbusTransmissionScreen,
+      pageBuilder: (context, state) {
+        final device = state.extra as ModbusDevice;
+        return CustomTransitionPage(
+          key: state.pageKey,
+          child: ModbusTransmissionScreen(device: device),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return SlideTransition(
+              position:
+                  Tween<Offset>(
+                    begin: const Offset(1.0, 0),
+                    end: Offset.zero,
+                  ).animate(
+                    CurvedAnimation(
+                      parent: animation,
+                      curve: Curves.easeOutCubic,
+                    ),
+                  ),
+              child: FadeTransition(opacity: animation, child: child),
+            );
+          },
+          transitionDuration: const Duration(milliseconds: 280),
+        );
+      },
     ),
   ],
 );
