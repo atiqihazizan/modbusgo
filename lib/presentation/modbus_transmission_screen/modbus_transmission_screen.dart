@@ -7,6 +7,7 @@ import 'package:sizer/sizer.dart';
 
 import '../../core/app_export.dart';
 import '../../core/services/ble_connection_service.dart';
+import '../../core/services/publish_service.dart';
 import '../../core/services/wifi_connection_cache.dart';
 import '../../core/transport/modbus_frame.dart';
 import '../../core/transport/modbus_transport.dart';
@@ -64,6 +65,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    PublishService().pauseGps(); // Modbus pegang kawalan publish
     // Jana arahan hex awal berdasarkan tetapan device
     commandText = _buildHexCommand(widget.device);
     // Jana command sebenar (RTU + CRC) untuk dihantar. commandText kekal utk paparan.
@@ -88,6 +90,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     _pollTimer?.cancel();
     _rxSub?.cancel();
     _transport?.disconnect();
+    PublishService().resumeGps(); // sambung semula GPS publish
     _tabController.dispose();
     super.dispose();
   }
@@ -236,6 +239,9 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
   void _onRxResponse(HexResponse resp) {
     if (!mounted) return;
     final raw = extractRawRegisters(resp.response);
+    final txType = widget.device.connectionType == ModbusConnectionType.bluetooth
+        ? 'Bluetooth'
+        : 'WiFi';
     final decoded = decodeRegisters(
       raw,
       dataType: dataTypeFromString(widget.device.dataType),
@@ -254,6 +260,14 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
         ),
       );
     });
+
+    // Publish ke MQTT — lokasi dibaca SEGAR dalam publishModbus.
+    if (!resp.isError) {
+      PublishService().publishModbus(
+        sensorData: decoded.isNotEmpty ? decoded : [-1],
+        transmissionType: txType,
+      );
+    }
   }
 
   void onOpenSettings() {

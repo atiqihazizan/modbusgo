@@ -15,6 +15,8 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 
+import 'device_identity_service.dart';
+import 'local_storage_service.dart';
 import 'location_service.dart';
 import 'mqtt_service.dart';
 
@@ -25,6 +27,21 @@ class PublishService {
 
   final MqttService _mqtt = MqttService();
   final LocationService _location = LocationService();
+
+  // Meta device (cache ringan; dimuat sekali, jarang berubah).
+  String? _nodeId;
+  String? _deviceName;
+
+  Future<void> _ensureMeta() async {
+    if (_nodeId != null) return;
+    try {
+      _nodeId = await DeviceIdentityService().getDeviceId();
+      final info = await LocalStorageService().getDeviceInfo();
+      _deviceName = (info?['name']?.isNotEmpty == true) ? info!['name'] : null;
+    } catch (_) {
+      _nodeId ??= 'unknown';
+    }
+  }
 
   // Bila true, GPS-change publish ditahan (Modbus sedang pegang kawalan).
   bool _gpsPaused = false;
@@ -103,8 +120,10 @@ class PublishService {
   /// Return true kalau publish dihantar; false kalau di-SKIP (tiada fix langsung).
   Future<bool> publishModbus({
     required List<dynamic> sensorData,
+    String transmissionType = 'Unknown',
     Duration locTimeout = const Duration(seconds: 4),
   }) async {
+    await _ensureMeta();
     LocationFix? fix;
     try {
       fix = await _location
@@ -130,6 +149,7 @@ class PublishService {
       speed: fix.speed,
       heading: fix.heading,
       sensorData: sensorData,
+      transmissionType: transmissionType,
     );
     return true;
   }
@@ -144,24 +164,37 @@ class PublishService {
     required double speed,
     required double? heading,
     required List<dynamic> sensorData,
+    String transmissionType = 'Unknown',
   }) {
     // Fallback koordinat ikut corak sedia ada (KL) bila tiada fix langsung.
     final lat = latitude ?? 3.1390;
     final lon = longitude ?? 101.6869;
+    final movingThreshold = 0.5; // m/s — selari home_screen
+    final sendDt = DateTime.now().toString().substring(0, 19);
 
-    _mqtt.publishBundle({
+    final payload = <String, dynamic>{
       'data_type': 'MG',
-      'latitude': lat,
-      'longitude': lon,
+      'node_id': _nodeId ?? 'unknown',
+      'send_dt': sendDt,
+      'status_live': 'online',
+      'motion_status': speed > movingThreshold ? 'moving' : 'idle',
       'speed': speed,
       if (heading != null) 'heading': heading,
+      'cpu_temp': 0.0, // telefon tak dedah suhu CPU sebenar
+      'latitude': lat,
+      'longitude': lon,
+      'battery_level': 0, // skip buat masa ni
+      'transmission_type': transmissionType,
       'sensor_data': sensorData,
-    });
+      'name': _deviceName ?? _nodeId ?? 'unknown',
+    };
+
+    _mqtt.publishBundle(payload);
 
     if (kDebugMode) {
       debugPrint('📤 [Publish] bundle sent — sensor=$sensorData '
           'lat=${lat.toStringAsFixed(4)} lon=${lon.toStringAsFixed(4)} '
-          'connected=${_mqtt.isConnected}');
+          'tx=$transmissionType connected=${_mqtt.isConnected}');
     }
   }
 
