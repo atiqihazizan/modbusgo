@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/app_export.dart';
 import '../../../widgets/common/app_card.dart';
 
+import '../../../core/services/ble_connection_service.dart';
 import '../../../core/services/modbus_storage_service.dart';
+import '../../../core/services/wifi_connection_cache.dart';
 
 enum ModbusConnectionType { wifi, bluetooth }
 
@@ -124,11 +128,22 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget> {
     final source = await _showSourcePickerDialog();
     if (source == null || !mounted) return;
 
-    // Step 2: show modbus settings dialog
+    // Step 2: scan/connect (BLE) atau test TCP (WiFi) — auto-isi address
+    String? resolvedAddress;
+    if (source == ModbusConnectionType.bluetooth) {
+      resolvedAddress = await _showBleScanAndConnectDialog();
+    } else {
+      resolvedAddress = await _showWifiConnectDialog();
+    }
+    if (resolvedAddress == null || !mounted) return;
+
+    // Step 3: tetapan Modbus (address dikunci dari sambungan)
     final result = await _showModbusSettingsDialog(
       context: context,
       connectionType: source,
       existingDevice: null,
+      initialAddress: resolvedAddress,
+      lockAddress: true,
     );
     if (result == null || !mounted) return;
 
@@ -273,10 +288,41 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget> {
     );
   }
 
+  Future<String?> _showBleScanAndConnectDialog() async {
+    final ble = BleConnectionService();
+    if (!await ble.ensureReady()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Bluetooth tidak aktif atau tidak disokong'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return null;
+    }
+    if (!mounted) return null;
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => _BleScanConnectDialog(ble: ble),
+    );
+  }
+
+  Future<String?> _showWifiConnectDialog() async {
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const _WifiConnectDialog(),
+    );
+  }
+
   Future<Map<String, dynamic>?> _showModbusSettingsDialog({
     required BuildContext context,
     required ModbusConnectionType connectionType,
     ModbusDevice? existingDevice,
+    String? initialAddress,
+    bool lockAddress = false,
   }) {
     return showDialog<Map<String, dynamic>>(
       context: context,
@@ -284,6 +330,8 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget> {
       builder: (ctx) => _ModbusSettingsDialog(
         connectionType: connectionType,
         existingDevice: existingDevice,
+        initialAddress: initialAddress,
+        lockAddress: lockAddress,
       ),
     );
   }
@@ -881,10 +929,14 @@ class _SubtitleChip extends StatelessWidget {
 class _ModbusSettingsDialog extends StatefulWidget {
   final ModbusConnectionType connectionType;
   final ModbusDevice? existingDevice;
+  final String? initialAddress;
+  final bool lockAddress;
 
   const _ModbusSettingsDialog({
     required this.connectionType,
     this.existingDevice,
+    this.initialAddress,
+    this.lockAddress = false,
   });
 
   @override
@@ -947,7 +999,9 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
     final d = widget.existingDevice;
     _nameCtrl = TextEditingController(text: d?.name ?? '');
     _addressCtrl = TextEditingController(
-      text: d?.address ?? (_isWifi ? '192.168.1.' : 'AA:BB:CC:DD:EE:FF'),
+      text: d?.address ??
+          widget.initialAddress ??
+          (_isWifi ? '192.168.1.' : 'AA:BB:CC:DD:EE:FF'),
     );
     _slaveIdCtrl = TextEditingController(text: d?.slaveId.toString() ?? '1');
     _startAddrCtrl = TextEditingController(text: '0x0000');
@@ -972,8 +1026,7 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
   Future<void> _onSave() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isSaving = true);
-    // TODO: connect real logic — save/connect device
-    await Future.delayed(const Duration(milliseconds: 600));
+    await Future<void>.delayed(Duration.zero);
     if (!mounted) return;
     Navigator.pop(context, {
       'name': _nameCtrl.text.trim(),
@@ -1086,10 +1139,11 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
                       ),
                       const SizedBox(height: 10),
                       _DialogField(
-                        label: _isWifi ? 'IP Address' : 'MAC Address',
-                        hint: _isWifi ? '192.168.1.x' : 'AA:BB:CC:DD:EE:FF',
+                        label: _isWifi ? 'IP : Port' : 'MAC / Device ID',
+                        hint: _isWifi ? '192.168.1.10:502' : 'remoteId BLE',
                         controller: _addressCtrl,
                         icon: _isWifi ? 'lan' : 'bluetooth',
+                        readOnly: widget.lockAddress,
                         validator: (v) =>
                             (v == null || v.trim().isEmpty) ? 'Required' : null,
                       ),
@@ -1254,6 +1308,260 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
   }
 }
 
+// ─── BLE scan + connect (Add Device) ─────────────────────────────────────────
+
+class _BleScanConnectDialog extends StatefulWidget {
+  final BleConnectionService ble;
+  const _BleScanConnectDialog({required this.ble});
+
+  @override
+  State<_BleScanConnectDialog> createState() => _BleScanConnectDialogState();
+}
+
+class _BleScanConnectDialogState extends State<_BleScanConnectDialog> {
+  List<BleScanItem> _items = [];
+  bool _scanning = true;
+  bool _connecting = false;
+  String? _error;
+  StreamSubscription<List<BleScanItem>>? _scanSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _startScan();
+  }
+
+  Future<void> _startScan() async {
+    _scanSub = widget.ble.scanBle().listen((list) {
+      if (mounted) setState(() => _items = list);
+    }, onDone: () {
+      if (mounted) setState(() => _scanning = false);
+    });
+  }
+
+  @override
+  void dispose() {
+    _scanSub?.cancel();
+    widget.ble.stopScan();
+    super.dispose();
+  }
+
+  Future<void> _onPick(BleScanItem item) async {
+    setState(() {
+      _connecting = true;
+      _error = null;
+    });
+    final result = await widget.ble.connectDevice(item.device);
+    if (!mounted) return;
+    if (result.ok) {
+      Navigator.pop(context, item.id);
+      return;
+    }
+    setState(() {
+      _connecting = false;
+      _error = result.error;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    const connColor = Color(0xFF7C3AED);
+    return AlertDialog(
+      title: const Text('Pilih peranti Bluetooth'),
+      content: SizedBox(
+        width: double.maxFinite,
+        height: 320,
+        child: _connecting
+            ? const Center(child: CircularProgressIndicator())
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (_scanning)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        children: [
+                          const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            'Mengimbas…',
+                            style: theme.textTheme.labelMedium,
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (_error != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        _error!,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: AppTheme.errorColor,
+                        ),
+                      ),
+                    ),
+                  Expanded(
+                    child: _items.isEmpty
+                        ? Center(
+                            child: Text(
+                              _scanning
+                                  ? 'Menunggu peranti…'
+                                  : 'Tiada peranti dijumpai',
+                              style: theme.textTheme.bodySmall,
+                            ),
+                          )
+                        : ListView.separated(
+                            itemCount: _items.length,
+                            separatorBuilder: (_, __) =>
+                                const Divider(height: 1),
+                            itemBuilder: (ctx, i) {
+                              final it = _items[i];
+                              return ListTile(
+                                dense: true,
+                                leading: Icon(Icons.bluetooth,
+                                    color: connColor, size: 22),
+                                title: Text(
+                                  it.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                subtitle: Text(
+                                  '${it.id} · ${it.rssi} dBm',
+                                  style: theme.textTheme.labelSmall,
+                                ),
+                                onTap: _connecting ? null : () => _onPick(it),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _connecting
+              ? null
+              : () {
+                  widget.ble.stopScan();
+                  Navigator.pop(context);
+                },
+          child: const Text('Batal'),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── WiFi TCP test-connect (Add Device) ──────────────────────────────────────
+
+class _WifiConnectDialog extends StatefulWidget {
+  const _WifiConnectDialog();
+
+  @override
+  State<_WifiConnectDialog> createState() => _WifiConnectDialogState();
+}
+
+class _WifiConnectDialogState extends State<_WifiConnectDialog> {
+  final _ipCtrl = TextEditingController(text: '192.168.1.');
+  final _portCtrl = TextEditingController(text: '502');
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _ipCtrl.dispose();
+    _portCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _connect() async {
+    final ip = _ipCtrl.text.trim();
+    final port = int.tryParse(_portCtrl.text.trim()) ?? 0;
+    if (ip.isEmpty || port <= 0 || port > 65535) {
+      setState(() => _error = 'IP atau port tidak sah');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final result = await WifiConnectionCache().connect(ip, port);
+    if (!mounted) return;
+    if (result.ok) {
+      Navigator.pop(context, '$ip:$port');
+      return;
+    }
+    setState(() {
+      _busy = false;
+      _error = result.error;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      title: const Text('Sambung WiFi / TCP'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _ipCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Alamat IP',
+              hintText: '192.168.1.10',
+            ),
+            keyboardType: TextInputType.number,
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _portCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Port Modbus',
+              hintText: '502',
+            ),
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              _error!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: AppTheme.errorColor,
+              ),
+            ),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.pop(context),
+          child: const Text('Batal'),
+        ),
+        FilledButton(
+          onPressed: _busy ? null : _connect,
+          child: _busy
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Text('Sambung'),
+        ),
+      ],
+    );
+  }
+}
+
 class _DialogSectionLabel extends StatelessWidget {
   final String label;
   final ThemeData theme;
@@ -1281,6 +1589,7 @@ class _DialogField extends StatelessWidget {
   final TextInputType? keyboardType;
   final List<TextInputFormatter>? inputFormatters;
   final String? Function(String?)? validator;
+  final bool readOnly;
 
   const _DialogField({
     required this.label,
@@ -1290,6 +1599,7 @@ class _DialogField extends StatelessWidget {
     this.keyboardType,
     this.inputFormatters,
     this.validator,
+    this.readOnly = false,
   });
 
   @override
@@ -1297,6 +1607,7 @@ class _DialogField extends StatelessWidget {
     final theme = Theme.of(context);
     return TextFormField(
       controller: controller,
+      readOnly: readOnly,
       keyboardType: keyboardType,
       inputFormatters: inputFormatters,
       validator: validator,

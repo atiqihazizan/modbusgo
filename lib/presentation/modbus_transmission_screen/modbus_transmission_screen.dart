@@ -7,6 +7,7 @@ import 'package:sizer/sizer.dart';
 
 import '../../core/app_export.dart';
 import '../../core/services/ble_connection_service.dart';
+import '../../core/services/wifi_connection_cache.dart';
 import '../../core/transport/modbus_frame.dart';
 import '../../core/transport/modbus_transport.dart';
 import '../../theme/app_theme.dart';
@@ -137,22 +138,49 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
   // CALLBACK HOOKS — sambung ke servis transport kemudian
   // ─────────────────────────────────────────────────────────────────────────
 
+  ({String ip, int port})? _parseWifiEndpoint(String address) {
+    final i = address.lastIndexOf(':');
+    if (i <= 0) return null;
+    final ip = address.substring(0, i);
+    final port = int.tryParse(address.substring(i + 1));
+    if (port == null || port <= 0 || port > 65535) return null;
+    return (ip: ip, port: port);
+  }
+
   Future<void> onConnect() async {
-    if (widget.device.connectionType != ModbusConnectionType.bluetooth) {
-      // WiFi belum dilaksanakan dalam fasa ni.
-      return;
+    if (widget.device.connectionType == ModbusConnectionType.bluetooth) {
+      final result = await BleConnectionService()
+          .connectByAddress(widget.device.address);
+      if (!mounted) return;
+      if (!result.ok) {
+        setState(() => isConnected = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result.error ?? 'Sambungan gagal')),
+        );
+        return;
+      }
+      _transport = result.transport;
+    } else {
+      final ep = _parseWifiEndpoint(widget.device.address);
+      if (ep == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Format address WiFi tidak sah (ip:port)')),
+        );
+        return;
+      }
+      final result =
+          await WifiConnectionCache().connect(ep.ip, ep.port);
+      if (!mounted) return;
+      if (!result.ok) {
+        setState(() => isConnected = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result.error ?? 'Sambungan gagal')),
+        );
+        return;
+      }
+      _transport = result.transport;
     }
-    final result = await BleConnectionService()
-        .connectByAddress(widget.device.address);
-    if (!mounted) return;
-    if (!result.ok) {
-      setState(() => isConnected = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result.error ?? 'Sambungan gagal')),
-      );
-      return;
-    }
-    _transport = result.transport;
     _rxSub = _transport!.hexResponseStream.listen(_onRxResponse);
     setState(() => isConnected = true);
   }
