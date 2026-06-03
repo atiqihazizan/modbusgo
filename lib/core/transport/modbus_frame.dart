@@ -138,6 +138,23 @@ String buildReadCommandFromUi({
 /// Ekstrak nilai register 16-bit mentah dari respons hex.
 /// Respons boleh PDU ([FC, byteCount, data...]) atau RTU ([slave, FC, byteCount, data...]).
 /// Diadaptasi dari rujukan _extractRegisterValuesManual (auto-detect byte count index).
+/// Respons Modbus exception: function code dengan bit 0x80 (PDU atau RTU).
+bool isModbusExceptionResponse(String responseHex) {
+  final clean = responseHex.replaceAll(RegExp(r'\s+'), '');
+  if (clean.length < 4 || clean.length.isOdd) return false;
+  final bytes = <int>[];
+  for (var i = 0; i < clean.length; i += 2) {
+    final b = int.tryParse(clean.substring(i, i + 2), radix: 16);
+    if (b == null) return false;
+    bytes.add(b);
+  }
+  if (bytes.length < 2) return false;
+  // PDU: [unit/FC][FC] — cuba index 1, kemudian index 2 (RTU dengan slave).
+  if ((bytes[1] & 0x80) != 0) return true;
+  if (bytes.length >= 3 && (bytes[2] & 0x80) != 0) return true;
+  return false;
+}
+
 List<int> extractRawRegisters(String responseHex) {
   final clean = responseHex.replaceAll(RegExp(r'\s+'), '');
   if (clean.length < 6 || clean.length.isOdd) return [];

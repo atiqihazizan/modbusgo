@@ -58,7 +58,11 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
 
   ModbusTransport? _transport; // transport aktif (BLE buat masa ni)
   StreamSubscription<HexResponse>? _rxSub;
-  Timer? _pollTimer;
+  Timer? _nextPollTimer;
+  Timer? _rxTimeoutTimer;
+  bool _awaitingRx = false; // TX dalam flight — tunggu RX/timeout sebelum poll seterusnya
+  static const Duration _pollInterval = Duration(milliseconds: 1000);
+  static const Duration _responseTimeout = Duration(milliseconds: 1000);
   String _sendableCommand = ''; // hex RTU sebenar (ada CRC) untuk dihantar
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -89,7 +93,9 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
 
   @override
   void dispose() {
-    _pollTimer?.cancel();
+    _nextPollTimer?.cancel();
+    _rxTimeoutTimer?.cancel();
+    _awaitingRx = false;
     _rxSub?.cancel();
     _transport?.disconnect();
     PublishService().resumeGps(); // sambung semula GPS publish
@@ -191,7 +197,9 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
   }
 
   void onDisconnect() {
-    _pollTimer?.cancel();
+    _nextPollTimer?.cancel();
+    _rxTimeoutTimer?.cancel();
+    _awaitingRx = false;
     _rxSub?.cancel();
     _transport?.disconnect();
     _transport = null;
@@ -205,26 +213,45 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
 
   void onStartLoop() {
     if (_transport == null || _sendableCommand.isEmpty) return;
+    _nextPollTimer?.cancel();
+    _rxTimeoutTimer?.cancel();
+    _awaitingRx = false;
     setState(() => isLooping = true);
-    _sendOnce(); // hantar serta-merta
-    const intervalMs = 1000; // TODO: ambil dari config kalau ada loopInterval
-    _pollTimer = Timer.periodic(
-      const Duration(milliseconds: intervalMs),
-      (_) => _sendOnce(),
-    );
+    _kickPollCycle();
   }
 
   void onStopLoop() {
-    _pollTimer?.cancel();
-    _pollTimer = null;
+    _nextPollTimer?.cancel();
+    _nextPollTimer = null;
+    _rxTimeoutTimer?.cancel();
+    _rxTimeoutTimer = null;
+    _awaitingRx = false;
     if (mounted) setState(() => isLooping = false);
   }
 
-  Future<void> _sendOnce() async {
+  /// Mulakan satu kitaran poll (satu TX) jika tiada permintaan sedang menunggu RX.
+  void _kickPollCycle() {
+    if (!isLooping || _transport == null || _sendableCommand.isEmpty) return;
+    if (_awaitingRx) return;
+    _sendPollRequest();
+  }
+
+  void _scheduleNextPollCycle() {
+    if (!isLooping || !mounted) return;
+    _nextPollTimer?.cancel();
+    _nextPollTimer = Timer(_pollInterval, () {
+      if (mounted && isLooping) _kickPollCycle();
+    });
+  }
+
+  Future<void> _sendPollRequest() async {
     final t = _transport;
-    if (t == null) return;
+    if (t == null || !isLooping) return;
+    if (_awaitingRx) return;
+
     final ok = await t.sendHexCommand(_sendableCommand);
-    if (!mounted) return;
+    if (!mounted || !isLooping) return;
+
     setState(() {
       txRxLog.insert(
         0,
@@ -236,22 +263,83 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
         ),
       );
     });
+
+    if (!ok) {
+      _finishPollCycle(
+        HexResponse(
+          response: 'TX_FAIL',
+          timestamp: DateTime.now(),
+          sourceCommand: _sendableCommand,
+          isError: true,
+        ),
+      );
+      return;
+    }
+
+    _awaitingRx = true;
+    _rxTimeoutTimer?.cancel();
+    _rxTimeoutTimer = Timer(_responseTimeout, () {
+      if (!mounted || !isLooping || !_awaitingRx) return;
+      _finishPollCycle(
+        HexResponse(
+          response: 'TIMEOUT',
+          timestamp: DateTime.now(),
+          sourceCommand: _sendableCommand,
+          isError: true,
+        ),
+      );
+    });
+  }
+
+  HexResponse _normalizeResponse(HexResponse resp) {
+    if (resp.isError) return resp;
+    if (isModbusExceptionResponse(resp.response)) {
+      return HexResponse(
+        response: resp.response,
+        timestamp: resp.timestamp,
+        sourceCommand: resp.sourceCommand,
+        isError: true,
+      );
+    }
+    return resp;
+  }
+
+  void _finishPollCycle(HexResponse resp) {
+    _rxTimeoutTimer?.cancel();
+    _awaitingRx = false;
+    _applyRxToUi(_normalizeResponse(resp));
+    if (isLooping && mounted) _scheduleNextPollCycle();
   }
 
   void _onRxResponse(HexResponse resp) {
     if (!mounted) return;
-    final raw = extractRawRegisters(resp.response);
+    final normalized = _normalizeResponse(resp);
+    if (isLooping) {
+      if (!_awaitingRx) return;
+      _finishPollCycle(normalized);
+      return;
+    }
+    _applyRxToUi(normalized);
+  }
+
+  void _applyRxToUi(HexResponse resp) {
     final txType = widget.device.connectionType == ModbusConnectionType.bluetooth
         ? 'Bluetooth'
         : 'WiFi';
-    final decoded = decodeRegisters(
-      raw,
-      dataType: dataTypeFromString(widget.device.dataType),
-      byteOrder: byteOrderFromString(widget.device.byteOrder),
-    );
+    final synthetic = resp.response == 'TIMEOUT' || resp.response == 'TX_FAIL';
+    List<num> decoded = [];
+    if (!synthetic && !resp.isError) {
+      final raw = extractRawRegisters(resp.response);
+      decoded = decodeRegisters(
+        raw,
+        dataType: dataTypeFromString(widget.device.dataType),
+        byteOrder: byteOrderFromString(widget.device.byteOrder),
+      );
+    }
+
     setState(() {
-      lastResponse = resp.response;
-      registerValues = decoded;
+      if (!synthetic) lastResponse = resp.response;
+      if (!resp.isError && decoded.isNotEmpty) registerValues = decoded;
       txRxLog.insert(
         0,
         TxRxLogEntry(
@@ -263,13 +351,18 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
       );
     });
 
-    // Publish ke MQTT — lokasi dibaca SEGAR dalam publishModbus.
-    if (!resp.isError) {
-      PublishService().publishModbus(
-        sensorData: decoded.isNotEmpty ? decoded : [-1],
-        transmissionType: txType,
-      );
+    List<dynamic> sensorPayload;
+    if (resp.response == 'TIMEOUT') {
+      sensorPayload = const ['TMO'];
+    } else if (resp.isError) {
+      sensorPayload = const ['ERR'];
+    } else {
+      sensorPayload = decoded.isNotEmpty ? decoded : [-1];
     }
+    PublishService().publishModbus(
+      sensorData: sensorPayload,
+      transmissionType: txType,
+    );
   }
 
   void onOpenSettings() {
