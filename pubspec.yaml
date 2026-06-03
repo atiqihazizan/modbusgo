@@ -24,20 +24,28 @@ dependencies:
   fluttertoast: ^8.2.4
   fl_chart: ^0.65.0
   go_router: ^14.6.1
-  flutter_secure_storage: ^9.2.2 # Secure persistent storage for device_id on Android (EncryptedSharedPreferences) and iOS (Keychain)
-  uuid: ^4.5.1                   # Generate UUID v4 for stable device identity
-  mobile_scanner: ^5.2.3         # QR/barcode scanning for provisioning scanner screen
+  flutter_secure_storage: ^9.2.2
+  uuid: ^4.5.1
+  mobile_scanner: ^5.2.3
   mqtt_client: ^10.7.0
-  geolocator: ^13.0.4            # GPS location services for provisioning and tracking
+  geolocator: ^13.0.4
   device_info_plus: ^11.5.0
-  package_info_plus: ^8.1.2      # Read app version and build number from platform
-
-
+  package_info_plus: ^8.1.2
   flutter_blue_plus: ^1.32.12
+
 dev_dependencies:
   flutter_test:    # CRITICAL: Required for Flutter project testing - DO NOT REMOVE
     sdk: flutter   # CRITICAL: Required for Flutter project testing - DO NOT REMOVE
   flutter_lints: ^5.0.0 # CRITICAL: Required for code quality - DO NOT REMOVE
+  flutter_launcher_icons: ^0.14.3 # Generate app launcher icons from asset image for Android and iOS
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/app_icon-1780309918034-removebg-preview-1780371862334.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/images/app_icon-1780309918034-removebg-preview-1780371862334.png"
 
 flutter:
   uses-material-design: true # CRITICAL: Required for Material icon font - DO NOT REMOVE

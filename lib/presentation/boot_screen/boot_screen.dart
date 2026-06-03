@@ -44,7 +44,7 @@ class _BootScreenState extends State<BootScreen>
   Future<void> _runBootSequence() async {
     try {
       await DeviceIdentityService().getDeviceId();
-
+      
       if (!mounted) return;
       setState(() => _statusMessage = 'Checking device registration…');
 
