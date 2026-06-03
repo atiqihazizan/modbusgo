@@ -599,7 +599,6 @@ class _DeviceTile extends StatelessWidget {
   final ModbusDevice device;
   final bool isExpanded;
   final VoidCallback onToggle;
-  final VoidCallback onTransmit;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
@@ -607,7 +606,6 @@ class _DeviceTile extends StatelessWidget {
     required this.device,
     required this.isExpanded,
     required this.onToggle,
-    required this.onTransmit,
     required this.onEdit,
     required this.onDelete,
   });
@@ -712,24 +710,10 @@ class _DeviceTile extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 4),
-              // Transmit, Edit, Delete, Dropdown icons
+              // Edit, Delete, Dropdown icons
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Tooltip(
-                    message: 'Transmit',
-                    child: GestureDetector(
-                      onTap: onTransmit,
-                      child: Padding(
-                        padding: const EdgeInsets.all(4),
-                        child: CustomIconWidget(
-                          iconName: 'send',
-                          color: AppTheme.primary,
-                          size: 17,
-                        ),
-                      ),
-                    ),
-                  ),
                   GestureDetector(
                     onTap: onEdit,
                     child: Padding(
