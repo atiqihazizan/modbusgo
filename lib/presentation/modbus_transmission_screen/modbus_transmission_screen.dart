@@ -667,7 +667,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
         children: [
           // Badge TX/RX
           Container(
-            width: 7.w,
+            width: 11.w,
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
             decoration: BoxDecoration(
               color: prefixColor.withAlpha(20),

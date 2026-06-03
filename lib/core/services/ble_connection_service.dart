@@ -10,10 +10,32 @@ import '../transport/modbus_transport.dart';
 
 class BleScanItem {
   final BluetoothDevice device;
-  final String name;
+  /// Nama paparan untuk user (bukan semestinya = MAC).
+  final String label;
+  /// Alamat MAC / remoteId (satu baris).
+  final String mac;
+  /// Petunjuk servis BLE atau jenis peranti.
+  final String hint;
   final int rssi;
-  const BleScanItem(this.device, this.name, this.rssi);
-  String get id => device.remoteId.str;
+  const BleScanItem({
+    required this.device,
+    required this.label,
+    required this.mac,
+    required this.hint,
+    required this.rssi,
+  });
+  String get id => mac.isNotEmpty ? mac : _tryRemoteId(device);
+  /// Alias lama — label paparan.
+  String get name => label;
+
+  static String _tryRemoteId(BluetoothDevice device) {
+    try {
+      final s = device.remoteId.str;
+      return s.isEmpty ? '' : s.toUpperCase();
+    } catch (_) {
+      return '';
+    }
+  }
 }
 
 class BleConnectResult {
@@ -31,60 +53,138 @@ class BleConnectionService {
   // Cache transport aktif ikut MAC. Transmit guna semula kalau masih connected.
   final Map<String, BleModbusTransport> _active = {};
 
+  /// Kunci cache seragam (elak mismatch huruf besar/kecil).
+  static String normBleAddress(String address) =>
+      address.trim().toUpperCase();
+
   BleModbusTransport? activeFor(String address) {
-    final t = _active[address];
+    final k = normBleAddress(address);
+    final t = _active[k];
     if (t != null && t.isConnected) return t;
-    _active.remove(address);
+    _active.remove(k);
     return null;
   }
 
   Future<bool> ensureReady() async {
     if (!await FlutterBluePlus.isSupported) return false;
-    final s = await FlutterBluePlus.adapterState.first;
-    return s == BluetoothAdapterState.on;
+    var state = await FlutterBluePlus.adapterState.first;
+    if (state != BluetoothAdapterState.on) {
+      try {
+        await FlutterBluePlus.turnOn();
+      } catch (_) {}
+      state = await FlutterBluePlus.adapterState.first;
+    }
+    return state == BluetoothAdapterState.on;
   }
 
-  /// Scan device BLE (tapis: ada nama atau service). Pulang stream senarai terkumpul.
-  Stream<List<BleScanItem>> scanBle({
-    Duration timeout = const Duration(seconds: 8),
-  }) async* {
-    final seen = <String, BleScanItem>{};
-    final controller = StreamController<List<BleScanItem>>();
-    final sub = FlutterBluePlus.onScanResults.listen((results) {
-      for (final r in results) {
-        // Tapis BLE: ada nama ATAU ada service UUID (buang noise tanpa identiti).
-        final hasName = r.device.platformName.isNotEmpty ||
-            r.advertisementData.advName.isNotEmpty;
-        final hasSvc = r.advertisementData.serviceUuids.isNotEmpty;
-        if (!hasName && !hasSvc) continue;
-        final name = r.device.platformName.isNotEmpty
-            ? r.device.platformName
-            : (r.advertisementData.advName.isNotEmpty
-                ? r.advertisementData.advName
-                : 'BLE Device');
-        seen[r.device.remoteId.str] =
-            BleScanItem(r.device, name, r.rssi);
+  static final RegExp _macPattern =
+      RegExp(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$');
+
+  /// Tapis iklan BLE connectable (bukan beacon/passive sahaja).
+  static bool isConnectableBle(ScanResult r) =>
+      r.advertisementData.connectable;
+
+  static String _serviceHint(AdvertisementData ad) {
+    for (final g in ad.serviceUuids) {
+      final s = g.toString().toLowerCase();
+      if (s.contains('6e400001')) return 'Nordic UART · sesuai Modbus BLE';
+      if (s.contains('ffe0') || s.contains('ff00')) {
+        return 'Serial BLE · kemungkinan Modbus';
       }
-      if (!controller.isClosed) {
-        controller.add(seen.values.toList()
-          ..sort((a, b) => b.rssi.compareTo(a.rssi)));
-      }
-    });
-    await FlutterBluePlus.startScan(
-      timeout: timeout,
-      androidUsesFineLocation: true,
+    }
+    if (ad.serviceUuids.isNotEmpty) {
+      return 'BLE · ${ad.serviceUuids.length} servis GATT';
+    }
+    return 'BLE · boleh disambung';
+  }
+
+  static String _displayLabel(ScanResult r, int listIndex) {
+    final platform = r.device.platformName.trim();
+    final adv = r.advertisementData.advName.trim();
+    if (platform.isNotEmpty && !_macPattern.hasMatch(platform)) {
+      return platform;
+    }
+    if (adv.isNotEmpty && !_macPattern.hasMatch(adv)) {
+      return adv;
+    }
+    return 'Peranti BLE #$listIndex';
+  }
+
+  static String _macFromScanResult(ScanResult r) {
+    try {
+      final s = r.device.remoteId.str;
+      if (s.isNotEmpty) return s.toUpperCase();
+    } catch (e) {
+      if (kDebugMode) debugPrint('⚠️ [BLE] remoteId invalid, skip: $e');
+    }
+    return '';
+  }
+
+  static BleScanItem? tryFromScanResult(ScanResult r, {required int listIndex}) {
+    final mac = _macFromScanResult(r);
+    if (mac.isEmpty) return null;
+    return BleScanItem(
+      device: r.device,
+      label: _displayLabel(r, listIndex),
+      mac: mac,
+      hint: _serviceHint(r.advertisementData),
+      rssi: r.rssi,
     );
-    // Pancar hasil sehingga scan tamat.
-    final done = Completer<void>();
-    Timer(timeout, () { if (!done.isCompleted) done.complete(); });
-    yield* controller.stream;
-    await done.future;
-    await sub.cancel();
-    await controller.close();
+  }
+
+  static BleScanItem fromScanResult(ScanResult r, {required int listIndex}) {
+    final item = tryFromScanResult(r, listIndex: listIndex);
+    assert(item != null, 'fromScanResult: MAC invalid');
+    return item!;
+  }
+
+  static List<BleScanItem> mapScanResults(List<ScanResult> results) {
+    final filtered =
+        results.where(isConnectableBle).toList()
+          ..sort((a, b) => b.rssi.compareTo(a.rssi));
+    final out = <BleScanItem>[];
+    for (final r in filtered) {
+      final item = tryFromScanResult(r, listIndex: out.length + 1);
+      if (item != null) out.add(item);
+    }
+    return out;
+  }
+
+  int _scanGeneration = 0;
+
+  /// Satu imbasan pada satu masa (elak start/stop bertindih → status=6 Android).
+  Future<void> startDeviceScan({
+    Duration timeout = const Duration(seconds: 12),
+  }) async {
+    final gen = ++_scanGeneration;
+    await stopScan();
+    // Beri masa scanner Android reset selepas stopScan.
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    if (gen != _scanGeneration) return;
+
+    try {
+      if (kDebugMode) debugPrint('🔵 [BLE] startDeviceScan (gen=$gen)');
+      await FlutterBluePlus.startScan(
+        timeout: timeout,
+        androidUsesFineLocation: false,
+      );
+      if (kDebugMode) debugPrint('🔵 [BLE] scan tamat (gen=$gen)');
+    } catch (e) {
+      if (kDebugMode) debugPrint('❌ [BLE] startScan: $e');
+      rethrow;
+    }
+  }
+
+  /// Batalkan imbasan / sesi semasa (dialog ditutup atau refresh).
+  Future<void> cancelScanSession() async {
+    _scanGeneration++;
+    await stopScan();
   }
 
   Future<void> stopScan() async {
-    try { await FlutterBluePlus.stopScan(); } catch (_) {}
+    try {
+      await FlutterBluePlus.stopScan();
+    } catch (_) {}
   }
 
   /// Connect + discover device tertentu (dari hasil scan). Cache transport.
@@ -109,13 +209,16 @@ class BleConnectionService {
       }
       if (writeChar == null || readChar == null) {
         await device.disconnect();
-        return const BleConnectResult(error: 'Characteristic write/read tak dijumpai');
+        return const BleConnectResult(
+            error: 'Characteristic write/read tak dijumpai');
       }
 
       final transport = BleModbusTransport(device, writeChar, readChar);
       await transport.startListening();
-      _active[device.remoteId.str] = transport;
-      if (kDebugMode) debugPrint('✅ [BLE] Connected ${device.remoteId.str}');
+      _active[normBleAddress(device.remoteId.str)] = transport;
+      if (kDebugMode) {
+        debugPrint('✅ [BLE] Connected ${normBleAddress(device.remoteId.str)}');
+      }
       return BleConnectResult(transport: transport);
     } catch (e) {
       if (kDebugMode) debugPrint('❌ [BLE] connectDevice: $e');
@@ -134,30 +237,43 @@ class BleConnectionService {
     if (!await ensureReady()) {
       return const BleConnectResult(error: 'Bluetooth tidak aktif/disokong');
     }
+    final want = normBleAddress(address);
     // Cuba dari peranti yang app dah connect.
     for (final d in FlutterBluePlus.connectedDevices) {
-      if (d.remoteId.str == address) return connectDevice(d);
+      if (normBleAddress(d.remoteId.str) == want) return connectDevice(d);
     }
     // Scan & padan remoteId.
     final completer = Completer<BluetoothDevice?>();
     late final StreamSubscription sub;
     sub = FlutterBluePlus.onScanResults.listen((results) {
       for (final r in results) {
-        if (r.device.remoteId.str == address) {
+        if (normBleAddress(r.device.remoteId.str) == want) {
           if (!completer.isCompleted) completer.complete(r.device);
           break;
         }
       }
     });
-    await FlutterBluePlus.startScan(
-        timeout: scanTimeout, androidUsesFineLocation: true);
-    final target =
-        await completer.future.timeout(scanTimeout, onTimeout: () => null);
-    await sub.cancel();
-    await stopScan();
-    if (target == null) {
-      return BleConnectResult(error: 'Peranti $address tak dijumpai');
+    try {
+      await stopScan();
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      await FlutterBluePlus.startScan(
+        timeout: scanTimeout,
+        androidUsesFineLocation: false,
+      );
+      final target = await completer.future.timeout(
+        scanTimeout,
+        onTimeout: () => null,
+      );
+      if (target == null) {
+        return BleConnectResult(error: 'Peranti $address tak dijumpai');
+      }
+      return connectDevice(target);
+    } catch (e) {
+      if (kDebugMode) debugPrint('❌ [BLE] connectByAddress scan: $e');
+      return BleConnectResult(error: 'Scan gagal: $e');
+    } finally {
+      await sub.cancel();
+      await stopScan();
     }
-    return connectDevice(target);
   }
 }

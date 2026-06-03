@@ -26,6 +26,7 @@ class ModbusStorageService {
         'id': d.id,
         'name': d.name,
         'address': d.address,
+        'port': d.port,
         'connectionType': d.connectionType.name, // 'wifi' / 'bluetooth'
         'slaveId': d.slaveId,
         'functionCode': d.functionCode,
@@ -36,9 +37,10 @@ class ModbusStorageService {
       };
 
   ModbusDevice _fromMap(Map<String, dynamic> m) => ModbusDevice(
-        id: m['id'] as String,
-        name: m['name'] as String,
-        address: m['address'] as String,
+        id: m['id'] as String? ?? '',
+        name: m['name'] as String? ?? 'Device',
+        address: m['address'] as String? ?? '',
+        port: m['port'] as int? ?? 502,
         connectionType: (m['connectionType'] as String) == 'bluetooth'
             ? ModbusConnectionType.bluetooth
             : ModbusConnectionType.wifi,
