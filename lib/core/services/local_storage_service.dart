@@ -19,6 +19,7 @@ class LocalStorageService {
   static const String _kOwnerData = 'owner_data';
   static const String _kSessionToken = 'session_token';
   static const String _kNeedApproval = 'need_approval';
+  static const String _kModbusRxTimeoutMs = 'modbus_rx_timeout_ms';
 
   Future<SharedPreferences> _getPrefs() async {
     _prefs ??= await SharedPreferences.getInstance();
@@ -98,6 +99,17 @@ class LocalStorageService {
     return prefs.getString(_kDeviceName);
   }
 
+  /// Had tunggu jawapan Modbus RX (ms) — tetapan global, sekali dalam Settings.
+  Future<int> getModbusRxTimeoutMs({int defaultMs = 1000}) async {
+    final prefs = await _getPrefs();
+    return prefs.getInt(_kModbusRxTimeoutMs) ?? defaultMs;
+  }
+
+  Future<void> saveModbusRxTimeoutMs(int ms) async {
+    final prefs = await _getPrefs();
+    await prefs.setInt(_kModbusRxTimeoutMs, ms);
+  }
+
   // --- Owner data (JSON) ---
 
   Future<void> saveOwnerData(Map<String, dynamic> data) async {
@@ -174,6 +186,7 @@ class LocalStorageService {
       prefs.remove(_kOwnerData),
       prefs.remove(_kSessionToken),
       prefs.remove(_kNeedApproval),
+      prefs.remove(_kModbusRxTimeoutMs),
     ]);
   }
 }

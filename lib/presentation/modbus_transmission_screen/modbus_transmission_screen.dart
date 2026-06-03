@@ -7,6 +7,8 @@ import 'package:sizer/sizer.dart';
 
 import '../../core/app_export.dart';
 import '../../core/services/ble_connection_service.dart';
+import '../../core/services/local_storage_service.dart';
+import '../../core/services/modbus_storage_service.dart';
 import '../../core/services/location_service.dart';
 import '../../core/services/publish_service.dart';
 import '../../core/services/wifi_connection_cache.dart';
@@ -61,15 +63,24 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
   Timer? _nextPollTimer;
   Timer? _rxTimeoutTimer;
   bool _awaitingRx = false; // TX dalam flight — tunggu RX/timeout sebelum poll seterusnya
-  static const Duration _pollInterval = Duration(milliseconds: 1000);
-  static const Duration _responseTimeout = Duration(milliseconds: 1000);
+  late final Duration _pollInterval;
+  late final Duration _responseTimeout;
   String _sendableCommand = ''; // hex RTU sebenar (ada CRC) untuk dihantar
+
+  Future<void> _loadGlobalRxTimeout() async {
+    final ms = await LocalStorageService().getModbusRxTimeoutMs();
+    if (!mounted) return;
+    setState(() => _responseTimeout = Duration(milliseconds: ms));
+  }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
+    _pollInterval = Duration(milliseconds: widget.device.pollInterval);
+    _responseTimeout = const Duration(milliseconds: 1000);
     _tabController = TabController(length: 2, vsync: this);
+    _loadGlobalRxTimeout();
     PublishService().pauseGps(); // Modbus pegang kawalan publish
     LocationService().start(); // pastikan lastFix sentiasa segar untuk publishModbus
     // Jana arahan hex awal berdasarkan tetapan device
@@ -365,9 +376,28 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     );
   }
 
-  void onOpenSettings() {
-    // TODO: Buka dialog ModbusSettingsWidget untuk device ini
-    // Boleh guna showModalBottomSheet atau Navigator.push
+  Future<void> onOpenSettings() async {
+    final result = await showModbusEditDialog(context, widget.device);
+    if (result == null || !mounted) return;
+    final updated = widget.device.copyWith(
+      name: result['name'] as String,
+      slaveId: result['slaveId'] as int,
+      functionCode: result['functionCode'] as String,
+      dataType: result['dataType'] as String,
+      byteOrder: result['byteOrder'] as String,
+      startAddress: result['startAddress'] as int,
+      registerCount: result['registerCount'] as int,
+      pollInterval: result['pollInterval'] as int? ?? widget.device.pollInterval,
+    );
+    await ModbusStorageService().update(updated);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Tetapan disimpan. Buka semula skrin untuk guna nilai baharu.',
+        ),
+      ),
+    );
   }
 
   // ── Toggle polling loop ────────────────────────────────────────────────────

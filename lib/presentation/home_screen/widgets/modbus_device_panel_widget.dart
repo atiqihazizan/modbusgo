@@ -26,6 +26,7 @@ class ModbusDevice {
   final String byteOrder;
   final int startAddress; // ← TAMBAH
   final int registerCount; // ← TAMBAH
+  final int pollInterval; // ms — selang antara poll (config)
   final List<ModbusRegisterValue> registerValues;
 
   const ModbusDevice({
@@ -41,6 +42,7 @@ class ModbusDevice {
     required this.byteOrder,
     this.startAddress = 0, // ← TAMBAH
     this.registerCount = 2, // ← TAMBAH
+    this.pollInterval = 1000,
     this.registerValues = const [],
   });
 
@@ -58,6 +60,7 @@ class ModbusDevice {
     List<ModbusRegisterValue>? registerValues,
     int? startAddress,
     int? registerCount,
+    int? pollInterval,
   }) {
     return ModbusDevice(
       id: id ?? this.id,
@@ -73,6 +76,7 @@ class ModbusDevice {
       registerValues: registerValues ?? this.registerValues,
       startAddress: startAddress ?? this.startAddress,
       registerCount: registerCount ?? this.registerCount,
+      pollInterval: pollInterval ?? this.pollInterval,
     );
   }
 }
@@ -197,7 +201,7 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
     if (verifiedAddress == null || !mounted) return;
 
     // Step 3: show modbus settings dialog (address readonly, auto-isi).
-    final result = await _showModbusSettingsDialog(
+    final result = await showModbusSettingsDialogShared(
       context: context,
       connectionType: source,
       existingDevice: null,
@@ -237,6 +241,7 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
         byteOrder: result['byteOrder'] as String,
         startAddress: result['startAddress'] as int,
         registerCount: result['registerCount'] as int,
+        pollInterval: result['pollInterval'] as int? ?? 1000,
         registerValues: const [],
       ),
     );
@@ -264,7 +269,7 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
   }
 
   void _onEditDevice(ModbusDevice device) async {
-    final result = await _showModbusSettingsDialog(
+    final result = await showModbusSettingsDialogShared(
       context: context,
       connectionType: device.connectionType,
       existingDevice: device,
@@ -280,6 +285,7 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
       byteOrder: result['byteOrder'] as String,
       startAddress: result['startAddress'] as int,
       registerCount: result['registerCount'] as int,
+      pollInterval: result['pollInterval'] as int? ?? 1000,
     );
     await _storage.update(updated);
     setState(() {
@@ -432,25 +438,6 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
           ],
         );
       },
-    );
-  }
-
-  Future<Map<String, dynamic>?> _showModbusSettingsDialog({
-    required BuildContext context,
-    required ModbusConnectionType connectionType,
-    ModbusDevice? existingDevice,
-    String? prefilledAddress,
-    String? prefilledName,
-  }) {
-    return showDialog<Map<String, dynamic>>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => _ModbusSettingsDialog(
-        connectionType: connectionType,
-        existingDevice: existingDevice,
-        prefilledAddress: prefilledAddress,
-        prefilledName: prefilledName,
-      ),
     );
   }
 
@@ -627,6 +614,38 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
       ),
     );
   }
+}
+
+/// Dialog tetapan Modbus (tambah / edit). Boleh dipanggil dari mana-mana skrin.
+Future<Map<String, dynamic>?> showModbusSettingsDialogShared({
+  required BuildContext context,
+  required ModbusConnectionType connectionType,
+  ModbusDevice? existingDevice,
+  String? prefilledAddress,
+  String? prefilledName,
+}) {
+  return showDialog<Map<String, dynamic>>(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) => _ModbusSettingsDialog(
+      connectionType: connectionType,
+      existingDevice: existingDevice,
+      prefilledAddress: prefilledAddress,
+      prefilledName: prefilledName,
+    ),
+  );
+}
+
+/// Buka dialog edit Modbus dari mana-mana skrin. Pulang Map hasil atau null.
+Future<Map<String, dynamic>?> showModbusEditDialog(
+  BuildContext context,
+  ModbusDevice device,
+) {
+  return showModbusSettingsDialogShared(
+    context: context,
+    connectionType: device.connectionType,
+    existingDevice: device,
+  );
 }
 
 // ─── Filter Chip ─────────────────────────────────────────────────────────────
@@ -1102,7 +1121,7 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
   late final TextEditingController _slaveIdCtrl;
   late final TextEditingController _startAddrCtrl;
   late final TextEditingController _lengthCtrl;
-  late final TextEditingController _timeoutCtrl;
+  late final TextEditingController _pollIntervalCtrl;
 
   late String _selectedFunctionCode;
   late String _selectedDataType;
@@ -1166,8 +1185,10 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
     _addressCtrl = TextEditingController(text: addressText);
     _slaveIdCtrl = TextEditingController(text: d?.slaveId.toString() ?? '1');
     _startAddrCtrl = TextEditingController(text: '0x0000');
-    _lengthCtrl = TextEditingController(text: '10');
-    _timeoutCtrl = TextEditingController(text: '1000');
+    _lengthCtrl = TextEditingController(
+      text: (d?.registerCount ?? 10).toString(),
+    );
+    _pollIntervalCtrl = TextEditingController(text: (d?.pollInterval ?? 1000).toString());
     _selectedFunctionCode = d?.functionCode ?? 'FC03';
     _selectedDataType = d?.dataType ?? 'INT16';
     _selectedByteOrder = d?.byteOrder ?? 'Big Endian';
@@ -1180,7 +1201,7 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
     _slaveIdCtrl.dispose();
     _startAddrCtrl.dispose();
     _lengthCtrl.dispose();
-    _timeoutCtrl.dispose();
+    _pollIntervalCtrl.dispose();
     super.dispose();
   }
 
@@ -1198,6 +1219,7 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
       'byteOrder': _selectedByteOrder,
       'startAddress': _parseAddr(_startAddrCtrl.text), // ← TAMBAH
       'registerCount': int.tryParse(_lengthCtrl.text) ?? 2, // ← TAMBAH
+      'pollInterval': int.tryParse(_pollIntervalCtrl.text.trim()) ?? 1000,
     });
   }
 
@@ -1280,154 +1302,159 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
               ),
             ),
             // Form
-            Flexible(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _DialogSectionLabel(label: 'Device Info', theme: theme),
-                      const SizedBox(height: 10),
-                      _DialogField(
-                        label: 'Device Name',
-                        hint: 'e.g. RTU Sensor A',
-                        controller: _nameCtrl,
-                        icon: 'label',
-                        validator: (v) =>
-                            (v == null || v.trim().isEmpty) ? 'Required' : null,
-                      ),
-                      const SizedBox(height: 10),
-                      _DialogField(
-                        label: _isWifi ? 'IP Address' : 'MAC Address',
-                        hint: _isWifi ? '192.168.1.x' : 'AA:BB:CC:DD:EE:FF',
-                        controller: _addressCtrl,
-                        icon: _isWifi ? 'lan' : 'bluetooth',
-                        readOnly: widget.prefilledAddress != null ||
-                            widget.existingDevice != null,
-                        validator: (v) =>
-                            (v == null || v.trim().isEmpty) ? 'Required' : null,
-                      ),
-                      const SizedBox(height: 16),
-                      _DialogSectionLabel(
-                        label: 'Modbus Parameters',
-                        theme: theme,
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _DialogField(
-                              label: 'Slave ID',
-                              hint: '1–247',
-                              controller: _slaveIdCtrl,
-                              icon: 'tag',
-                              keyboardType: TextInputType.number,
-                              inputFormatters: [
-                                FilteringTextInputFormatter.digitsOnly,
-                                LengthLimitingTextInputFormatter(3),
-                              ],
-                              validator: (v) =>
-                                  (v == null || v.isEmpty) ? 'Required' : null,
+            MediaQuery(
+              data: MediaQuery.of(context).copyWith(
+                textScaler: TextScaler.linear(0.8),
+              ),
+              child: Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(20),
+                  child: Form(
+                    key: _formKey,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _DialogSectionLabel(label: 'Device Info', theme: theme),
+                        const SizedBox(height: 12),
+                        _DialogField(
+                          label: 'Device Name',
+                          hint: 'e.g. RTU Sensor A',
+                          controller: _nameCtrl,
+                          icon: 'label',
+                          validator: (v) =>
+                              (v == null || v.trim().isEmpty) ? 'Required' : null,
+                        ),
+                        const SizedBox(height: 16),
+                        _DialogField(
+                          label: _isWifi ? 'IP Address' : 'MAC Address',
+                          hint: _isWifi ? '192.168.1.x' : 'AA:BB:CC:DD:EE:FF',
+                          controller: _addressCtrl,
+                          icon: _isWifi ? 'lan' : 'bluetooth',
+                          readOnly: widget.prefilledAddress != null ||
+                              widget.existingDevice != null,
+                          validator: (v) =>
+                              (v == null || v.trim().isEmpty) ? 'Required' : null,
+                        ),
+                        const SizedBox(height: 20),
+                        _DialogSectionLabel(
+                          label: 'Modbus Parameters',
+                          theme: theme,
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _DialogField(
+                                label: 'Slave ID',
+                                hint: '1–247',
+                                controller: _slaveIdCtrl,
+                                icon: 'tag',
+                                keyboardType: TextInputType.number,
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.digitsOnly,
+                                  LengthLimitingTextInputFormatter(3),
+                                ],
+                                validator: (v) =>
+                                    (v == null || v.isEmpty) ? 'Required' : null,
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _DialogField(
-                              label: 'Start Address',
-                              hint: '0x0000',
-                              controller: _startAddrCtrl,
-                              icon: 'pin',
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: _DialogField(
+                                label: 'Start Address',
+                                hint: '0x0000',
+                                controller: _startAddrCtrl,
+                                icon: 'pin',
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _DialogField(
-                              label: 'Length',
-                              hint: '10',
-                              controller: _lengthCtrl,
-                              icon: 'format_list_numbered',
-                              keyboardType: TextInputType.number,
-                              inputFormatters: [
-                                FilteringTextInputFormatter.digitsOnly,
-                              ],
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _DialogField(
+                                label: 'Length',
+                                hint: '10',
+                                controller: _lengthCtrl,
+                                icon: 'format_list_numbered',
+                                keyboardType: TextInputType.number,
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.digitsOnly,
+                                ],
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _DialogField(
-                              label: 'Timeout (ms)',
-                              hint: '1000',
-                              controller: _timeoutCtrl,
-                              icon: 'timer',
-                              keyboardType: TextInputType.number,
-                              inputFormatters: [
-                                FilteringTextInputFormatter.digitsOnly,
-                              ],
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: _DialogField(
+                                label: 'Poll Interval (ms)',
+                                hint: '1000',
+                                controller: _pollIntervalCtrl,
+                                icon: 'timelapse',
+                                keyboardType: TextInputType.number,
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.digitsOnly,
+                                ],
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      // _DialogDropdown(
-                      //   label: 'Function Code',
-                      //   value: _selectedFunctionCode,
-                      //   items: _functionCodes,
-                      //   icon: 'code',
-                      //   onChanged: (v) =>
-                      //       setState(() => _selectedFunctionCode = v!),
-                      // ),
-                      _DialogDropdown(
-                        label: 'Byte Order',
-                        value: _selectedByteOrder,
-                        items: _byteOrders,
-                        icon: 'swap_horiz',
-                        onChanged: (v) =>
-                            setState(() => _selectedByteOrder = v!),
-                      ),                      
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _DialogDropdown(
-                              label: 'Func Code',
-                              value: _selectedFunctionCode,
-                              items: _functionCodes,
-                              icon: 'code',
-                              onChanged: (v) =>
-                                  setState(() => _selectedFunctionCode = v!),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        // _DialogDropdown(
+                        //   label: 'Function Code',
+                        //   value: _selectedFunctionCode,
+                        //   items: _functionCodes,
+                        //   icon: 'code',
+                        //   onChanged: (v) =>
+                        //       setState(() => _selectedFunctionCode = v!),
+                        // ),
+                        _DialogDropdown(
+                          label: 'Byte Order',
+                          value: _selectedByteOrder,
+                          items: _byteOrders,
+                          icon: 'swap_horiz',
+                          onChanged: (v) =>
+                              setState(() => _selectedByteOrder = v!),
+                        ),                      
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _DialogDropdown(
+                                label: 'Func Code',
+                                value: _selectedFunctionCode,
+                                items: _functionCodes,
+                                icon: 'code',
+                                onChanged: (v) =>
+                                    setState(() => _selectedFunctionCode = v!),
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _DialogDropdown(
-                              label: 'Data Type',
-                              value: _selectedDataType,
-                              items: _dataTypes,
-                              icon: 'data_object',
-                              onChanged: (v) =>
-                                  setState(() => _selectedDataType = v!),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: _DialogDropdown(
+                                label: 'Data Type',
+                                value: _selectedDataType,
+                                items: _dataTypes,
+                                icon: 'data_object',
+                                onChanged: (v) =>
+                                    setState(() => _selectedDataType = v!),
+                              ),
                             ),
-                          ),
-                          // const SizedBox(width: 10),
-                          // Expanded(
-                          //   child: _DialogDropdown(
-                          //     label: 'Byte Order',
-                          //     value: _selectedByteOrder,
-                          //     items: _byteOrders,
-                          //     icon: 'swap_horiz',
-                          //     onChanged: (v) =>
-                          //         setState(() => _selectedByteOrder = v!),
-                          //   ),
-                          // ),
-                        ],
-                      ),
-                    ],
+                            // const SizedBox(width: 10),
+                            // Expanded(
+                            //   child: _DialogDropdown(
+                            //     label: 'Byte Order',
+                            //     value: _selectedByteOrder,
+                            //     items: _byteOrders,
+                            //     icon: 'swap_horiz',
+                            //     onChanged: (v) =>
+                            //         setState(() => _selectedByteOrder = v!),
+                            //   ),
+                            // ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -1468,7 +1495,7 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
                               color: Colors.white,
                               size: 16,
                             ),
-                      label: Text(_isSaving ? 'Saving…' : 'Save & Add'),
+                      label: Text(_isSaving ? 'Saving…' : 'Save'),
                       style: FilledButton.styleFrom(
                         backgroundColor: connColor,
                         foregroundColor: Colors.white,
@@ -1547,7 +1574,7 @@ class _DialogField extends StatelessWidget {
           child: CustomIconWidget(
             iconName: icon,
             color: theme.colorScheme.onSurfaceVariant,
-            size: 17,
+            size: 15,
           ),
         ),
         prefixIconConstraints: const BoxConstraints(minWidth: 30),
@@ -1582,7 +1609,7 @@ class _DialogDropdown extends StatelessWidget {
     return DropdownButtonFormField<String>(
       initialValue: value,
       isExpanded: true,
-      style: theme.textTheme.bodyMedium,
+      style: theme.textTheme.bodySmall,
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: Padding(
@@ -1591,14 +1618,14 @@ class _DialogDropdown extends StatelessWidget {
           child: CustomIconWidget(
             iconName: icon,
             color: theme.colorScheme.onSurfaceVariant,
-            size: 17,
+            size: 15,
           ),
         ),
         // prefixIconConstraints: const BoxConstraints(minWidth: 40),
-        prefixIconConstraints: const BoxConstraints(minWidth: 30),
+        prefixIconConstraints: const BoxConstraints(minWidth: 20),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 7,
-          vertical: 10,
+          vertical: 8,
         ),
         isDense: true,
       ),

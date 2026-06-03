@@ -59,7 +59,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final agencyCode = await storage.getAgencyCode();
     final agencyToken = await storage.getAgencyToken();
     final deviceId = await DeviceIdentityService().getDeviceId();
-
     String appVer = '—';
     try {
       final pkg = await PackageInfo.fromPlatform();

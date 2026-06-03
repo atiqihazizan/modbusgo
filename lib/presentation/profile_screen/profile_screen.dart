@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/app_export.dart';
 import '../../core/services/device_identity_service.dart';
@@ -35,6 +36,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // ── Reconnect ──
   bool _isReconnecting = false;
 
+  // ── Modbus RX timeout (global, set once) ──
+  final _modbusTimeoutCtrl = TextEditingController(text: '1000');
+  bool _isSavingModbusTimeout = false;
+
   // ── Timer for live MQTT status ──
   Timer? _statusTimer;
 
@@ -53,6 +58,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void dispose() {
     _statusTimer?.cancel();
+    _modbusTimeoutCtrl.dispose();
     super.dispose();
   }
 
@@ -64,9 +70,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final agencyToken = await storage.getAgencyToken();
     final deviceId = await DeviceIdentityService().getDeviceId();
     final agencies = await RegistrationService().listAgencies();
+    final modbusTimeoutMs = await storage.getModbusRxTimeoutMs(defaultMs: 1000);
 
     if (mounted) {
       setState(() {
+        _modbusTimeoutCtrl.text = modbusTimeoutMs.toString();
         _deviceName = deviceInfo?['name'] ?? 'Unknown Device';
         _deviceId = deviceInfo?['device_id'] ?? deviceId;
         _agencyName = agencyName ?? '-';
@@ -79,7 +87,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  /// Reload agency data dari backend → simpan ke storage → refresh UI.
+  Future<void> _saveModbusTimeout() async {
+    final ms = int.tryParse(_modbusTimeoutCtrl.text.trim()) ?? 1000;
+    setState(() => _isSavingModbusTimeout = true);
+    await LocalStorageService().saveModbusRxTimeoutMs(ms);
+    if (!mounted) return;
+    setState(() => _isSavingModbusTimeout = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Modbus timeout saved'),
+        backgroundColor: AppTheme.success,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  /// Reload agency data from backend, save to storage, refresh UI.
   Future<void> _reloadAgency() async {
     setState(() => _isReloadingAgency = true);
 
@@ -303,27 +327,40 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // ── 1) Profile Section ──
-                  _buildProfileSection(),
-                  const SizedBox(height: 20),
+          : MediaQuery(
+              data: MediaQuery.of(context).copyWith(
+                textScaler: const TextScaler.linear(
+                  0.85,
+                ), // adjust ikut citarasa
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 20,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // ── 1) Profile Section ──
+                    _buildProfileSection(),
+                    const SizedBox(height: 20),
 
-                  // ── 2) Agency Card ──
-                  _buildAgencyCard(),
-                  const SizedBox(height: 20),
+                    // ── 2) Agency Card ──
+                    _buildAgencyCard(),
+                    const SizedBox(height: 20),
 
-                  // ── 3) Switch Agency ──
-                  _buildSwitchAgencySection(),
-                  const SizedBox(height: 20),
+                    // ── 3) Switch Agency ──
+                    _buildSwitchAgencySection(),
+                    const SizedBox(height: 20),
 
-                  // ── 4) Reconnect MQTT ──
-                  _buildReconnectButton(),
-                  const SizedBox(height: 24),
-                ],
+                    // ── 4) Reconnect MQTT ──
+                    _buildReconnectButton(),
+                    const SizedBox(height: 24),
+
+                    _buildModbusTimeoutCard(),
+                    const SizedBox(height: 20),
+                  ],
+                ),
               ),
             ),
     );
@@ -557,25 +594,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ],
             ),
           ),
-          const Divider(
-            height: 1,
-            indent: 16,
-            endIndent: 16,
-            color: Color(0xFFEEF2F7),
-          ),
+          // const Divider(
+          //   height: 1,
+          //   indent: 16,
+          //   endIndent: 16,
+          //   color: Color(0xFFEEF2F7),
+          // ),
 
-          // Agency Token — masked
-          _buildInfoRow(
-            icon: 'vpn_key',
-            label: 'Agency Token',
-            value: _maskToken(_agencyToken),
-            valueStyle: GoogleFonts.sourceCodePro(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: const Color(0xFF475569),
-              letterSpacing: 1.0,
-            ),
-          ),
+          // // Agency Token — masked
+          // _buildInfoRow(
+          //   icon: 'vpn_key',
+          //   label: 'Agency Token',
+          //   value: _maskToken(_agencyToken),
+          //   valueStyle: GoogleFonts.sourceCodePro(
+          //     fontSize: 13,
+          //     fontWeight: FontWeight.w600,
+          //     color: const Color(0xFF475569),
+          //     letterSpacing: 1.0,
+          //   ),
+          // ),
           const SizedBox(height: 4),
         ],
       ),
@@ -823,6 +860,97 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ],
               ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // Modbus timeout (global)
+  // ─────────────────────────────────────────────
+  Widget _buildModbusTimeoutCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.cardLight,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const CustomIconWidget(
+                iconName: 'timer',
+                size: 18,
+                color: Color(0xFFD97706),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Modbus',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: const Color(0xFFD97706),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Response wait time (RX) for all Modbus devices. Set it once here.',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 12,
+              color: const Color(0xFF64748B),
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _modbusTimeoutCtrl,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: InputDecoration(
+              labelText: 'Request Timeout (ms)',
+              hintText: '1000',
+              filled: true,
+              fillColor: const Color(0xFFF1F5F9),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: _isSavingModbusTimeout ? null : _saveModbusTimeout,
+              icon: _isSavingModbusTimeout
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const CustomIconWidget(
+                      iconName: 'save',
+                      size: 18,
+                      color: Colors.white,
+                    ),
+              label: Text(
+                _isSavingModbusTimeout ? 'Saving…' : 'Save timeout',
+                style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

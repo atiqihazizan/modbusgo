@@ -28,16 +28,24 @@ class PublishService {
   final MqttService _mqtt = MqttService();
   final LocationService _location = LocationService();
 
-  // Meta device (cache ringan; dimuat sekali, jarang berubah).
   String? _nodeId;
   String? _deviceName;
+  String? _sessionToken;
 
   Future<void> _ensureMeta() async {
     if (_nodeId != null) return;
     try {
       _nodeId = await DeviceIdentityService().getDeviceId();
-      final info = await LocalStorageService().getDeviceInfo();
+      final storage = LocalStorageService();
+      final info = await storage.getDeviceInfo();
       _deviceName = (info?['name']?.isNotEmpty == true) ? info!['name'] : null;
+      // Session token: jana sekali kalau belum ada (kekal sepanjang pemasangan).
+      var token = await storage.getSessionToken();
+      if (token == null || token.isEmpty) {
+        token = 'sess-${DateTime.now().millisecondsSinceEpoch}';
+        await storage.saveSessionToken(token);
+      }
+      _sessionToken = token;
     } catch (_) {
       _nodeId ??= 'unknown';
     }
@@ -190,6 +198,7 @@ class PublishService {
       'transmission_type': transmissionType,
       'sensor_data': sensorData,
       'name': _deviceName ?? _nodeId ?? 'unknown',
+      if (_sessionToken != null) 'session_token': _sessionToken,
     };
 
     _mqtt.publishBundle(payload);

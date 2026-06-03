@@ -34,6 +34,7 @@ class ModbusStorageService {
         'byteOrder': d.byteOrder,
         'startAddress': d.startAddress,
         'registerCount': d.registerCount,
+        'pollInterval': d.pollInterval,
       };
 
   ModbusDevice _fromMap(Map<String, dynamic> m) => ModbusDevice(
@@ -51,6 +52,7 @@ class ModbusStorageService {
         byteOrder: m['byteOrder'] as String? ?? 'Big Endian',
         startAddress: m['startAddress'] as int? ?? 0,
         registerCount: m['registerCount'] as int? ?? 2,
+        pollInterval: m['pollInterval'] as int? ?? 1000,
         registerValues: const [],
       );
 
