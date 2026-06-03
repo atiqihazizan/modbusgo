@@ -201,6 +201,12 @@ List<int> extractRawRegisters(String responseHex) {
 /// Tukar register mentah → nilai ikut dataType + byteOrder.
 /// Pulang List<num> sedia untuk publish (sensor_data).
 /// Nota: ini liputan asas (INT16/UINT16/INT32/UINT32/FLOAT32). FLOAT64 perlu 4 reg.
+/// Skala paparan/publish: nilai dibahagi [scale] (cth scale 10 → zoom out ÷10).
+List<num> applyRegisterScale(List<num> values, double scale) {
+  if (scale <= 0 || scale == 1) return values;
+  return values.map((v) => v / scale).toList();
+}
+
 List<num> decodeRegisters(
   List<int> raw, {
   required ModbusDataType dataType,

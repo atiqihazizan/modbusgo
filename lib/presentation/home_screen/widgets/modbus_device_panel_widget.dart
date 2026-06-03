@@ -26,6 +26,8 @@ class ModbusDevice {
   final String byteOrder;
   final int startAddress; // ← TAMBAH
   final int registerCount; // ← TAMBAH
+  /// Pembahagi nilai register (1 = tiada skala; 10 = nilai ÷10, zoom out).
+  final double scale;
   final List<ModbusRegisterValue> registerValues;
 
   const ModbusDevice({
@@ -41,6 +43,7 @@ class ModbusDevice {
     required this.byteOrder,
     this.startAddress = 0, // ← TAMBAH
     this.registerCount = 2, // ← TAMBAH
+    this.scale = 1,
     this.registerValues = const [],
   });
 
@@ -58,6 +61,7 @@ class ModbusDevice {
     List<ModbusRegisterValue>? registerValues,
     int? startAddress,
     int? registerCount,
+    double? scale,
   }) {
     return ModbusDevice(
       id: id ?? this.id,
@@ -73,6 +77,7 @@ class ModbusDevice {
       registerValues: registerValues ?? this.registerValues,
       startAddress: startAddress ?? this.startAddress,
       registerCount: registerCount ?? this.registerCount,
+      scale: scale ?? this.scale,
     );
   }
 }
@@ -230,6 +235,7 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
         byteOrder: result['byteOrder'] as String,
         startAddress: result['startAddress'] as int,
         registerCount: result['registerCount'] as int,
+        scale: result['scale'] as double,
         registerValues: const [],
       ),
     );
@@ -273,6 +279,7 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
       byteOrder: result['byteOrder'] as String,
       startAddress: result['startAddress'] as int,
       registerCount: result['registerCount'] as int,
+      scale: result['scale'] as double,
     );
     await _storage.update(updated);
     setState(() {
@@ -1089,6 +1096,7 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
   late final TextEditingController _startAddrCtrl;
   late final TextEditingController _lengthCtrl;
   late final TextEditingController _timeoutCtrl;
+  late final TextEditingController _scaleCtrl;
 
   late String _selectedFunctionCode;
   late String _selectedDataType;
@@ -1129,6 +1137,17 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
     return int.tryParse(t) ?? 0;
   }
 
+  double _parseScale(String s) {
+    final v = double.tryParse(s.trim());
+    if (v == null || v <= 0) return 1;
+    return v;
+  }
+
+  String _formatScale(double scale) {
+    if (scale == scale.roundToDouble()) return scale.toInt().toString();
+    return scale.toString();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1140,9 +1159,14 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
           (_isWifi ? '192.168.1.' : 'AA:BB:CC:DD:EE:FF'),
     );
     _slaveIdCtrl = TextEditingController(text: d?.slaveId.toString() ?? '1');
-    _startAddrCtrl = TextEditingController(text: '0x0000');
-    _lengthCtrl = TextEditingController(text: '10');
+    _startAddrCtrl = TextEditingController(
+      text: d != null
+          ? '0x${d.startAddress.toRadixString(16).padLeft(4, '0').toUpperCase()}'
+          : '0x0000',
+    );
+    _lengthCtrl = TextEditingController(text: d?.registerCount.toString() ?? '10');
     _timeoutCtrl = TextEditingController(text: '1000');
+    _scaleCtrl = TextEditingController(text: _formatScale(d?.scale ?? 1));
     _selectedFunctionCode = d?.functionCode ?? 'FC03';
     _selectedDataType = d?.dataType ?? 'INT16';
     _selectedByteOrder = d?.byteOrder ?? 'Big Endian';
@@ -1156,6 +1180,7 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
     _startAddrCtrl.dispose();
     _lengthCtrl.dispose();
     _timeoutCtrl.dispose();
+    _scaleCtrl.dispose();
     super.dispose();
   }
 
@@ -1173,6 +1198,7 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
       'byteOrder': _selectedByteOrder,
       'startAddress': _parseAddr(_startAddrCtrl.text), // ← TAMBAH
       'registerCount': int.tryParse(_lengthCtrl.text) ?? 2, // ← TAMBAH
+      'scale': _parseScale(_scaleCtrl.text),
     });
   }
 
@@ -1345,6 +1371,21 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
                                 FilteringTextInputFormatter.digitsOnly,
                               ],
                             ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      _DialogField(
+                        label: 'Scale (zoom out ÷)',
+                        hint: '1 = tiada, 10 = ÷10',
+                        controller: _scaleCtrl,
+                        icon: 'zoom_out',
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(
+                            RegExp(r'[0-9.]'),
                           ),
                         ],
                       ),

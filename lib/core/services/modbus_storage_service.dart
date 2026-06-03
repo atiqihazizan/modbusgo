@@ -34,6 +34,7 @@ class ModbusStorageService {
         'byteOrder': d.byteOrder,
         'startAddress': d.startAddress,
         'registerCount': d.registerCount,
+        'scale': d.scale,
       };
 
   ModbusDevice _fromMap(Map<String, dynamic> m) => ModbusDevice(
@@ -51,6 +52,7 @@ class ModbusStorageService {
         byteOrder: m['byteOrder'] as String? ?? 'Big Endian',
         startAddress: m['startAddress'] as int? ?? 0,
         registerCount: m['registerCount'] as int? ?? 2,
+        scale: (m['scale'] as num?)?.toDouble() ?? 1,
         registerValues: const [],
       );
 
