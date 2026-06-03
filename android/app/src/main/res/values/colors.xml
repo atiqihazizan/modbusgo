@@ -2,4 +2,5 @@
 <resources>
     <!-- Sama dengan AppTheme.surfaceLight — lancar ke BootScreen Flutter -->
     <color name="boot_surface">#FFF8FAFC</color>
+	<color name="ic_launcher_background">#FFFFFF</color>
 </resources>

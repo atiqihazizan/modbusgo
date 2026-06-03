@@ -79,7 +79,7 @@ class _PendingScreenState extends State<PendingScreen> {
                   Image.asset(
                     width: 90,
                     height: 90,
-                    "assets/images/app_icon-1780309918034-removebg-preview-1780371944977.png",
+                    "assets/images/app_logo.png",
                   ),
                   const SizedBox(height: 24),
                   Container(

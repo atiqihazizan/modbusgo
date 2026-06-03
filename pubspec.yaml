@@ -42,10 +42,10 @@ dev_dependencies:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/images/app_icon-1780309918034-removebg-preview-1780371862334.png"
+  image_path: "assets/images/app_logo.png"
   min_sdk_android: 21
   adaptive_icon_background: "#FFFFFF"
-  adaptive_icon_foreground: "assets/images/app_icon-1780309918034-removebg-preview-1780371862334.png"
+  adaptive_icon_foreground: "assets/images/app_logo.png"
 
 flutter:
   uses-material-design: true # CRITICAL: Required for Material icon font - DO NOT REMOVE

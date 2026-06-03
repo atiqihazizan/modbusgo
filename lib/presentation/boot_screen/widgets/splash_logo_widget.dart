@@ -68,7 +68,7 @@ class _SplashLogoWidgetState extends State<SplashLogoWidget>
                   size: 72,
                 ),
               ),
-              "assets/images/GO-1780372541638.png",
+              "assets/images/go_modbus_logo.png",
             ),
           ),
           const SizedBox(height: 20),

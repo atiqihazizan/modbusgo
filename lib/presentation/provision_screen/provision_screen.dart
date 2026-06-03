@@ -172,7 +172,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
                 Image.asset(
                   width: 100,
                   height: 100,
-                  "assets/images/app_icon-1780309918034-removebg-preview-1780371800429.png",
+                  "assets/images/app_logo.png",
                 ),
                 const SizedBox(height: 24),
                 Container(
