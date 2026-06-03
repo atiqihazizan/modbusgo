@@ -64,7 +64,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
   Timer? _rxTimeoutTimer;
   bool _awaitingRx = false; // TX dalam flight — tunggu RX/timeout sebelum poll seterusnya
   late final Duration _pollInterval;
-  late final Duration _responseTimeout;
+  Duration _responseTimeout = const Duration(milliseconds: 1000); // global, dimuat async
   String _sendableCommand = ''; // hex RTU sebenar (ada CRC) untuk dihantar
 
   Future<void> _loadGlobalRxTimeout() async {
@@ -78,9 +78,8 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
   void initState() {
     super.initState();
     _pollInterval = Duration(milliseconds: widget.device.pollInterval);
-    _responseTimeout = const Duration(milliseconds: 1000);
     _tabController = TabController(length: 2, vsync: this);
-    _loadGlobalRxTimeout();
+    _loadGlobalRxTimeout(); // isi _responseTimeout dari tetapan global
     PublishService().pauseGps(); // Modbus pegang kawalan publish
     LocationService().start(); // pastikan lastFix sentiasa segar untuk publishModbus
     // Jana arahan hex awal berdasarkan tetapan device
