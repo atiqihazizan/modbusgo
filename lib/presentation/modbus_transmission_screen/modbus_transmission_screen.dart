@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:sizer/sizer.dart';
 
 import '../../core/app_export.dart';
+import '../../core/services/ble_connection_service.dart';
+import '../../core/transport/modbus_frame.dart';
 import '../../core/transport/modbus_transport.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common/app_card.dart';
@@ -49,6 +53,11 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
 
   late TabController _tabController;
 
+  ModbusTransport? _transport; // transport aktif (BLE buat masa ni)
+  StreamSubscription<HexResponse>? _rxSub;
+  Timer? _pollTimer;
+  String _sendableCommand = ''; // hex RTU sebenar (ada CRC) untuk dihantar
+
   // ── Lifecycle ──────────────────────────────────────────────────────────────
   @override
   void initState() {
@@ -56,12 +65,28 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     _tabController = TabController(length: 2, vsync: this);
     // Jana arahan hex awal berdasarkan tetapan device
     commandText = _buildHexCommand(widget.device);
+    // Jana command sebenar (RTU + CRC) untuk dihantar. commandText kekal utk paparan.
+    try {
+      _sendableCommand = buildReadCommandFromUi(
+        slaveId: widget.device.slaveId,
+        functionCode: widget.device.functionCode,
+        startAddress: widget.device.startAddress,
+        registerCount: widget.device.registerCount,
+      );
+    } catch (e) {
+      _sendableCommand = '';
+    }
     // Inisialisasi senarai nilai register kosong
     registerValues = List.filled(widget.device.registerCount, 0);
+    // Auto-connect bila masuk skrin (BLE sahaja buat masa ni).
+    WidgetsBinding.instance.addPostFrameCallback((_) => onConnect());
   }
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
+    _rxSub?.cancel();
+    _transport?.disconnect();
     _tabController.dispose();
     super.dispose();
   }
@@ -112,25 +137,95 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
   // CALLBACK HOOKS — sambung ke servis transport kemudian
   // ─────────────────────────────────────────────────────────────────────────
 
-  void onConnect() {
-    // TODO: Panggil ModbusTransport.connect(device) atau BLE connect
-    // Kemaskini isConnected = true selepas berjaya
+  Future<void> onConnect() async {
+    if (widget.device.connectionType != ModbusConnectionType.bluetooth) {
+      // WiFi belum dilaksanakan dalam fasa ni.
+      return;
+    }
+    final result = await BleConnectionService()
+        .connectByAddress(widget.device.address);
+    if (!mounted) return;
+    if (!result.ok) {
+      setState(() => isConnected = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.error ?? 'Sambungan gagal')),
+      );
+      return;
+    }
+    _transport = result.transport;
+    _rxSub = _transport!.hexResponseStream.listen(_onRxResponse);
+    setState(() => isConnected = true);
   }
 
   void onDisconnect() {
-    // TODO: Panggil ModbusTransport.disconnect()
-    // Kemaskini isConnected = false
+    _pollTimer?.cancel();
+    _rxSub?.cancel();
+    _transport?.disconnect();
+    _transport = null;
+    if (mounted) {
+      setState(() {
+        isConnected = false;
+        isLooping = false;
+      });
+    }
   }
 
   void onStartLoop() {
-    // TODO: Mulakan timer/stream polling — hantar commandText setiap interval
-    // Tambah entri TX ke txRxLog, kemaskini registerValues apabila terima RX
+    if (_transport == null || _sendableCommand.isEmpty) return;
     setState(() => isLooping = true);
+    _sendOnce(); // hantar serta-merta
+    const intervalMs = 1000; // TODO: ambil dari config kalau ada loopInterval
+    _pollTimer = Timer.periodic(
+      const Duration(milliseconds: intervalMs),
+      (_) => _sendOnce(),
+    );
   }
 
   void onStopLoop() {
-    // TODO: Hentikan timer/stream polling
-    setState(() => isLooping = false);
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    if (mounted) setState(() => isLooping = false);
+  }
+
+  Future<void> _sendOnce() async {
+    final t = _transport;
+    if (t == null) return;
+    final ok = await t.sendHexCommand(_sendableCommand);
+    if (!mounted) return;
+    setState(() {
+      txRxLog.insert(
+        0,
+        TxRxLogEntry(
+          isTx: true,
+          data: _sendableCommand,
+          time: DateTime.now(),
+          isError: !ok,
+        ),
+      );
+    });
+  }
+
+  void _onRxResponse(HexResponse resp) {
+    if (!mounted) return;
+    final raw = extractRawRegisters(resp.response);
+    final decoded = decodeRegisters(
+      raw,
+      dataType: dataTypeFromString(widget.device.dataType),
+      byteOrder: byteOrderFromString(widget.device.byteOrder),
+    );
+    setState(() {
+      lastResponse = resp.response;
+      registerValues = decoded;
+      txRxLog.insert(
+        0,
+        TxRxLogEntry(
+          isTx: false,
+          data: resp.response,
+          time: DateTime.now(),
+          isError: resp.isError,
+        ),
+      );
+    });
   }
 
   void onOpenSettings() {
