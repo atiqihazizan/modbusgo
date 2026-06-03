@@ -179,9 +179,14 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
 
     // Step 2: connect dulu (BT scan/connect ATAU WiFi ip/port), dapatkan address.
     String? verifiedAddress;
+    String? bleName;
+
     int verifiedPort = 502;
     if (source == ModbusConnectionType.bluetooth) {
-      verifiedAddress = await _scanAndConnectBle();
+      final bleResult = await _scanAndConnectBle();
+      if (bleResult == null || !mounted) return;
+      verifiedAddress = bleResult['mac'];
+      bleName = bleResult['name'];
     } else {
       final w = await _connectWifi();
       if (w != null) {
@@ -197,6 +202,8 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
       connectionType: source,
       existingDevice: null,
       prefilledAddress: verifiedAddress,
+      prefilledName:
+          (bleName != null && bleName.isNotEmpty) ? bleName : null,
     );
     if (result == null || !mounted) return;
 
@@ -314,7 +321,7 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
   }
 
   /// Scan BLE, pilih device, connect+discover. Pulang MAC kalau berjaya.
-  Future<String?> _scanAndConnectBle() async {
+  Future<Map<String, String>?> _scanAndConnectBle() async {
     final svc = BleConnectionService();
     if (!await svc.ensureReady()) {
       if (mounted) {
@@ -352,7 +359,10 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
       }
       return null;
     }
-    return selected.mac; // MAC/remoteId (selamat jika remoteId.str null)
+    return <String, String>{
+      'mac': selected.mac,
+      'name': selected.label,
+    };
   }
 
   /// Dialog IP/port, test connect TCP. Pulang (ip, port) kalau berjaya.
@@ -430,6 +440,7 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
     required ModbusConnectionType connectionType,
     ModbusDevice? existingDevice,
     String? prefilledAddress,
+    String? prefilledName,
   }) {
     return showDialog<Map<String, dynamic>>(
       context: context,
@@ -438,6 +449,7 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
         connectionType: connectionType,
         existingDevice: existingDevice,
         prefilledAddress: prefilledAddress,
+        prefilledName: prefilledName,
       ),
     );
   }
@@ -1068,11 +1080,13 @@ class _ModbusSettingsDialog extends StatefulWidget {
   final ModbusConnectionType connectionType;
   final ModbusDevice? existingDevice;
   final String? prefilledAddress;
+  final String? prefilledName;
 
   const _ModbusSettingsDialog({
     required this.connectionType,
     this.existingDevice,
     this.prefilledAddress,
+    this.prefilledName,
   });
 
   @override
@@ -1133,12 +1147,23 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
   void initState() {
     super.initState();
     final d = widget.existingDevice;
-    _nameCtrl = TextEditingController(text: d?.name ?? '');
-    _addressCtrl = TextEditingController(
-      text: widget.prefilledAddress ??
-          d?.address ??
-          (_isWifi ? '192.168.1.' : 'AA:BB:CC:DD:EE:FF'),
-    );
+    final addressText = widget.prefilledAddress ??
+        d?.address ??
+        (_isWifi ? '192.168.1.' : 'AA:BB:CC:DD:EE:FF');
+    final trimmedBleName = widget.prefilledName?.trim();
+    final defaultName = d?.name ??
+        (d == null &&
+                trimmedBleName != null &&
+                trimmedBleName.isNotEmpty
+            ? trimmedBleName
+            : (widget.prefilledAddress != null && d == null
+                ? (!_isWifi
+                    ? widget.prefilledAddress!.trim().toUpperCase()
+                    : widget.prefilledAddress!.trim())
+                : ''));
+
+    _nameCtrl = TextEditingController(text: defaultName);
+    _addressCtrl = TextEditingController(text: addressText);
     _slaveIdCtrl = TextEditingController(text: d?.slaveId.toString() ?? '1');
     _startAddrCtrl = TextEditingController(text: '0x0000');
     _lengthCtrl = TextEditingController(text: '10');
