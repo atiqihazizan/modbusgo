@@ -7,6 +7,7 @@ import 'package:sizer/sizer.dart';
 
 import '../../core/app_export.dart';
 import '../../core/services/ble_connection_service.dart';
+import '../../core/services/location_service.dart';
 import '../../core/services/publish_service.dart';
 import '../../core/services/wifi_connection_cache.dart';
 import '../../core/transport/modbus_frame.dart';
@@ -66,6 +67,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     PublishService().pauseGps(); // Modbus pegang kawalan publish
+    LocationService().start(); // pastikan lastFix sentiasa segar untuk publishModbus
     // Jana arahan hex awal berdasarkan tetapan device
     commandText = _buildHexCommand(widget.device);
     // Jana command sebenar (RTU + CRC) untuk dihantar. commandText kekal utk paparan.

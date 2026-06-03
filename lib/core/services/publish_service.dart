@@ -115,8 +115,8 @@ class PublishService {
   ///   Untuk error/timeout, hantar penanda (cth ['ERR'] / ['TMO']) ikut kontrak
   ///   yang dipersetujui di layer transport — service ini hantar apa adanya.
   ///
-  /// Strategi lokasi: cuba getCurrentFix() segar (had [locTimeout]); kalau gagal
-  /// atau lambat, fallback ke lastFix supaya publish tak tergantung.
+  /// Strategi lokasi: utamakan lastFix dari stream (instant); one-shot getCurrentFix
+  /// hanya bila lastFix tiada ([locTimeout]).
   /// Return true kalau publish dihantar; false kalau di-SKIP (tiada fix langsung).
   Future<bool> publishModbus({
     required List<dynamic> sensorData,
@@ -124,16 +124,19 @@ class PublishService {
     Duration locTimeout = const Duration(seconds: 4),
   }) async {
     await _ensureMeta();
-    LocationFix? fix;
-    try {
-      fix = await _location
-          .getCurrentFix(timeout: locTimeout)
-          .timeout(locTimeout, onTimeout: () => null);
-    } catch (_) {
-      fix = null;
+    // UTAMA: guna fix terkini dari stream (instant) — elak getCurrentPosition
+    // yang lambat/timeout setiap RX. Stream dihidupkan oleh skrin transmission.
+    LocationFix? fix = _location.lastFix;
+    // Fallback: tiada lastFix langsung → cuba one-shot sekali.
+    if (fix == null) {
+      try {
+        fix = await _location
+            .getCurrentFix(timeout: locTimeout)
+            .timeout(locTimeout, onTimeout: () => null);
+      } catch (_) {
+        fix = null;
+      }
     }
-    // Fallback: fix segar gagal → guna fix terakhir diketahui.
-    fix ??= _location.lastFix;
 
     // KEPUTUSAN: tiada fix langsung → SKIP publish (jujur, jangan tipu KL).
     if (fix == null) {
