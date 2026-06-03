@@ -330,13 +330,10 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     List<num> decoded = [];
     if (!synthetic && !resp.isError) {
       final raw = extractRawRegisters(resp.response);
-      decoded = applyRegisterScale(
-        decodeRegisters(
-          raw,
-          dataType: dataTypeFromString(widget.device.dataType),
-          byteOrder: byteOrderFromString(widget.device.byteOrder),
-        ),
-        widget.device.scale,
+      decoded = decodeRegisters(
+        raw,
+        dataType: dataTypeFromString(widget.device.dataType),
+        byteOrder: byteOrderFromString(widget.device.byteOrder),
       );
     }
 
