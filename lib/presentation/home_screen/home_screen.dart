@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/app_export.dart';
+import '../../core/constants/tracking_publish_config.dart';
 import '../../core/services/device_identity_service.dart';
 import '../../core/services/local_storage_service.dart';
 import '../../core/services/location_service.dart';
@@ -174,7 +175,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       setState(() {
         _coordinates = _fmtCoords(fix.latitude, fix.longitude);
-        _isMoving = fix.speed > 0.5;
+        _isMoving = fix.speed >
+            TrackingPublishConfig.motionMovingSpeedThresholdMps;
       });
       if (!_initialHomePublishDone) {
         unawaited(_tryInitialHomePublish());
@@ -201,7 +203,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (mounted && fix != null) {
       setState(() {
         _coordinates = _fmtCoords(fix.latitude, fix.longitude);
-        _isMoving = fix.speed > 0.5;
+        _isMoving = fix.speed >
+            TrackingPublishConfig.motionMovingSpeedThresholdMps;
       });
     }
     if (mounted) {
@@ -247,7 +250,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     var fix = LocationService().lastFix;
     if (fix == null ||
         (fix.accuracy != null &&
-            fix.accuracy! > LocationService.maxAcceptableAccuracyMeters)) {
+            fix.accuracy! >
+                TrackingPublishConfig.maxAcceptableAccuracyMeters)) {
       fix = await LocationService().getCurrentFix();
     }
     if (fix == null) {
@@ -298,7 +302,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (fix != null) {
       setState(() {
         _coordinates = _fmtCoords(fix.latitude, fix.longitude);
-        _isMoving = fix.speed > 0.5;
+        _isMoving = fix.speed >
+            TrackingPublishConfig.motionMovingSpeedThresholdMps;
       });
       await PublishService().publishCurrentSnapshot(fix: fix);
       if (!mounted) return;

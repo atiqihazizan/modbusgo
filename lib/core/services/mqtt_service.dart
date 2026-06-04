@@ -251,11 +251,12 @@ class MqttService {
 
   /// Bina payload padan backend normalizeTrackingData.
   /// node_id WAJIB (= device_id). TANPA agency_token.
+  /// [data] boleh override status_live (cth offline pada exit snapshot).
   Map<String, dynamic> _buildPayload(Map<String, dynamic> data) {
     return <String, dynamic>{
       'node_id': _deviceId,
       'send_dt': _nowIso(),
-      'status_live': 'online',
+      if (!data.containsKey('status_live')) 'status_live': 'online',
       ...data,
     };
   }

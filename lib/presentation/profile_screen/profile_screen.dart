@@ -7,6 +7,7 @@ import '../../core/app_export.dart';
 import '../../core/services/device_identity_service.dart';
 import '../../core/services/local_storage_service.dart';
 import '../../core/services/mqtt_service.dart';
+import '../../core/services/publish_service.dart';
 import '../../core/services/registration_service.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -227,6 +228,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     setState(() => _isSwitching = true);
 
+    await PublishService().publishExitSnapshot(exitContext: 'agency_switch');
     // Disconnect MQTT (publishes {online:false} retained, tears down)
     MqttService().disconnect();
 

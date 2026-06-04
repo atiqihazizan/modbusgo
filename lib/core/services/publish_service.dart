@@ -1,14 +1,13 @@
 // PublishService — PINTU TUNGGAL untuk semua publish tracking bundle.
 //
-// Reka bentuk (disahkan dengan keputusan projek):
-//   - Mutually exclusive: Modbus (dalam skrin Transmission) ATAU GPS (luar skrin).
-//   - Masuk skrin Transmission → pauseGps(): GPS-change publish ditahan.
-//   - Keluar skrin Transmission → resumeGps(): GPS-change publish sambung semula.
-//   - Data Modbus masuk → publishModbus(): baca lat/lon segar, publish sensor sebenar.
-//   - GPS berubah (luar skrin) → publishGps(): sensor_data [-1] (tiada data sensor).
+// Reka bentuk (disahkan dengan keputusan projek — lihat history-development/publish-gps-modbus-flow.md):
+//   - GPS-change publish di-hold hanya semasa polling loop (pauseGps / resumeGps).
+//   - Skrin Transmission aktif → setTransmissionScreenActive (cache sensor untuk exit snapshot).
+//   - Data Modbus (polling) → publishModbus(): lat/lon terkini; stuck → last reliable fix.
+//   - GPS berubah → publishGps(): sensor_data [-1]; skip jika pause polling.
 //   - Keluar app / background / pop Transmission → publishExitSnapshot(): semua medan
-//     penting (lat/lon, speed, heading, bateri, suhu, …); sensor_data ikut konteks
-//     (Modbus aktif → nilai sensor semasa, else [-1]).
+//     penting (lat/lon, speed, heading, bateri, suhu, …); status_live 'offline';
+//     sensor_data ikut konteks (Modbus aktif → nilai sensor semasa, else [-1]).
 //
 // Service ini TIDAK menggantikan MqttService/LocationService — ia membungkus
 // keduanya supaya logik bina-payload + kawalan pause berada di SATU tempat.
@@ -20,11 +19,19 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../constants/metric_units.dart';
+import '../constants/tracking_publish_config.dart';
 import 'device_identity_service.dart';
 import 'device_metrics_service.dart';
 import 'local_storage_service.dart';
 import 'location_service.dart';
 import 'mqtt_service.dart';
+
+/// Nilai [status_live] dalam bundle tracking (selari backend).
+abstract final class PublishStatusLive {
+  static const String online = TrackingPublishConfig.statusLiveOnline;
+  static const String idle = TrackingPublishConfig.statusLiveIdle;
+  static const String offline = TrackingPublishConfig.statusLiveOffline;
+}
 
 class PublishService {
   PublishService._internal();
@@ -74,40 +81,53 @@ class PublishService {
   List<dynamic>? _lastModbusSensorPayload;
   String _lastModbusTransmissionType = 'Unknown';
 
+  /// Fix lokasi terakhir yang berjaya dipakai untuk publish Modbus (fallback bila GPS stuck).
+  LocationFix? _lastReliableModbusFix;
+
   DateTime _lastExitPublish = DateTime.fromMillisecondsSinceEpoch(0);
-  static const Duration _exitPublishDebounce = Duration(seconds: 4);
 
   // Throttle GPS publish — elak spam bila fix masuk laju. Modbus TIDAK di-throttle
   // di sini sebab kadarnya dikawal oleh polling loop transport.
   DateTime _lastGpsPublish = DateTime.fromMillisecondsSinceEpoch(0);
-  static const Duration _gpsMinGap = Duration(seconds: 3);
 
   double? _lastPublishedLat;
   double? _lastPublishedLon;
-  static const double _coordEpsilon = 5e-5;
 
   bool _coordinatesChanged(double lat, double lon) {
+    final eps = TrackingPublishConfig.coordinateChangeEpsilonDegrees;
     if (_lastPublishedLat == null || _lastPublishedLon == null) return true;
-    return (lat - _lastPublishedLat!).abs() > _coordEpsilon ||
-        (lon - _lastPublishedLon!).abs() > _coordEpsilon;
+    return (lat - _lastPublishedLat!).abs() > eps ||
+        (lon - _lastPublishedLon!).abs() > eps;
   }
 
   // ---------------------------------------------------------------
-  // KAWALAN PAUSE (dipanggil oleh skrin Transmission)
+  // KAWALAN SKRIN / PAUSE POLLING (skrin Transmission)
   // ---------------------------------------------------------------
 
-  /// Masuk skrin Transmission — tahan GPS-change publish.
+  /// Masuk/keluar skrin Transmission (bukan pause GPS — itu ikut polling sahaja).
+  void setTransmissionScreenActive(bool active) {
+    _modbusTransmissionActive = active;
+    if (kDebugMode) {
+      debugPrint(
+        active
+            ? '📡 [Publish] Transmission screen active'
+            : '📡 [Publish] Transmission screen inactive',
+      );
+    }
+  }
+
+  /// Start polling loop — tahan GPS-change publish supaya tidak bertindih Modbus.
   void pauseGps() {
     _gpsPaused = true;
-    _modbusTransmissionActive = true;
-    if (kDebugMode) debugPrint('⏸️ [Publish] GPS publish paused (Modbus active)');
+    if (kDebugMode) {
+      debugPrint('⏸️ [Publish] GPS-change held (polling active)');
+    }
   }
 
-  /// Keluar skrin Transmission — sambung GPS-change publish.
+  /// Stop polling loop — benarkan GPS-change semula (masih boleh di skrin Transmit).
   void resumeGps() {
     _gpsPaused = false;
-    _modbusTransmissionActive = false;
-    if (kDebugMode) debugPrint('▶️ [Publish] GPS publish resumed');
+    if (kDebugMode) debugPrint('▶️ [Publish] GPS-change resumed (polling stopped)');
   }
 
   // ---------------------------------------------------------------
@@ -122,7 +142,10 @@ class PublishService {
     if (!_coordinatesChanged(fix.latitude, fix.longitude)) return false;
 
     final now = DateTime.now();
-    if (now.difference(_lastGpsPublish) < _gpsMinGap) return false;
+    if (now.difference(_lastGpsPublish) <
+        TrackingPublishConfig.gpsChangeMinGap) {
+      return false;
+    }
     _lastGpsPublish = now;
 
     _publish(
@@ -144,7 +167,7 @@ class PublishService {
   /// [requireConnected].
   Future<bool> publishCurrentSnapshot({
     LocationFix? fix,
-    Duration locTimeout = const Duration(seconds: 20),
+    Duration locTimeout = TrackingPublishConfig.locationTimeoutSnapshot,
     bool requireConnected = false,
   }) async {
     if (_gpsPaused) return false;
@@ -155,7 +178,8 @@ class PublishService {
     var f = fix ?? _location.lastFix;
     if (f == null ||
         (f.accuracy != null &&
-            f.accuracy! > LocationService.maxAcceptableAccuracyMeters)) {
+            f.accuracy! >
+                TrackingPublishConfig.maxAcceptableAccuracyMeters)) {
       f = await _location.getCurrentFix(timeout: locTimeout);
     }
 
@@ -186,30 +210,15 @@ class PublishService {
   ///   Untuk error/timeout, hantar penanda (cth ['ERR'] / ['TMO']) ikut kontrak
   ///   yang dipersetujui di layer transport — service ini hantar apa adanya.
   ///
-  /// Strategi lokasi: utamakan lastFix dari stream (instant); one-shot getCurrentFix
-  /// hanya bila lastFix tiada ([locTimeout]).
-  /// Return true kalau publish dihantar; false kalau di-SKIP (tiada fix langsung).
+  /// Strategi lokasi: lastFix stream → one-shot segar → last reliable (stuck/tiada baru).
+  /// Return true kalau publish dihantar; false hanya bila tiada sebarang fix pernah.
   Future<bool> publishModbus({
     required List<dynamic> sensorData,
     String transmissionType = 'Unknown',
-    Duration locTimeout = const Duration(seconds: 4),
+    Duration locTimeout = TrackingPublishConfig.locationTimeoutModbus,
   }) async {
     await _ensureMeta();
-    // UTAMA: guna fix terkini dari stream (instant) — elak getCurrentPosition
-    // yang lambat/timeout setiap RX. Stream dihidupkan oleh skrin transmission.
-    LocationFix? fix = _location.lastFix;
-    // Fallback: tiada lastFix langsung → cuba one-shot sekali.
-    if (fix == null) {
-      try {
-        fix = await _location
-            .getCurrentFix(timeout: locTimeout)
-            .timeout(locTimeout, onTimeout: () => null);
-      } catch (_) {
-        fix = null;
-      }
-    }
-
-    // KEPUTUSAN: tiada fix langsung → SKIP publish (jujur, jangan tipu KL).
+    final fix = await _resolveFixForModbusPublish(locTimeout: locTimeout);
     if (fix == null) {
       if (kDebugMode) {
         debugPrint('⚠️ [Publish] Modbus skip — no GPS fix available');
@@ -217,6 +226,7 @@ class PublishService {
       return false;
     }
 
+    _lastReliableModbusFix = fix;
     _lastModbusSensorPayload = List<dynamic>.from(sensorData);
     _lastModbusTransmissionType = transmissionType;
 
@@ -231,6 +241,22 @@ class PublishService {
     return true;
   }
 
+  Future<LocationFix?> _resolveFixForModbusPublish({
+    required Duration locTimeout,
+  }) async {
+    var fix = _location.lastFix;
+    if (fix == null) {
+      try {
+        fix = await _location
+            .getCurrentFix(timeout: locTimeout)
+            .timeout(locTimeout, onTimeout: () => null);
+      } catch (_) {
+        fix = null;
+      }
+    }
+    return fix ?? _lastReliableModbusFix;
+  }
+
   // ---------------------------------------------------------------
   // PUBLISH KELUAR / BACKGROUND (graceful exit — bukan force-kill)
   // ---------------------------------------------------------------
@@ -242,10 +268,11 @@ class PublishService {
     List<dynamic>? sensorData,
     String? transmissionType,
     String exitContext = 'exit',
-    Duration locTimeout = const Duration(seconds: 3),
+    Duration locTimeout = TrackingPublishConfig.locationTimeoutExit,
   }) async {
     final now = DateTime.now();
-    if (now.difference(_lastExitPublish) < _exitPublishDebounce) {
+    if (now.difference(_lastExitPublish) <
+        TrackingPublishConfig.exitPublishDebounce) {
       if (kDebugMode) {
         debugPrint('⏭️ [Publish] exit skip debounce ($exitContext)');
       }
@@ -296,10 +323,14 @@ class PublishService {
       heading: fix.heading,
       sensorData: sensors,
       transmissionType: txType,
+      statusLive: PublishStatusLive.offline,
     );
 
     if (kDebugMode) {
-      debugPrint('📤 [Publish] exit snapshot ($exitContext) sensor=$sensors');
+      debugPrint(
+        '📤 [Publish] exit snapshot ($exitContext) '
+        'status_live=${PublishStatusLive.offline} sensor=$sensors',
+      );
     }
     return true;
   }
@@ -315,6 +346,7 @@ class PublishService {
     required double? heading,
     required List<dynamic> sensorData,
     String transmissionType = 'Unknown',
+    String statusLive = PublishStatusLive.online,
   }) {
     unawaited(DeviceMetricsService().refreshBattery());
 
@@ -326,14 +358,15 @@ class PublishService {
     }
     final lat = latitude;
     final lon = longitude;
-    final movingThreshold = 0.5; // m/s — selari home_screen
+    final movingThreshold =
+        TrackingPublishConfig.motionMovingSpeedThresholdMps;
     final sendDt = DateTime.now().toString().substring(0, 19);
 
     final payload = <String, dynamic>{
       'data_type': 'MG',
       'node_id': _nodeId ?? 'unknown',
       'send_dt': sendDt,
-      'status_live': 'online',
+      'status_live': statusLive,
       'motion_status': speed > movingThreshold ? 'moving' : 'idle',
       'speed': speed,
       'speed_unit': MetricUnits.metersPerSecond,
@@ -353,9 +386,10 @@ class PublishService {
     _lastPublishedLon = lon;
 
     if (kDebugMode) {
-      debugPrint('📤 [Publish] bundle sent — sensor=$sensorData '
-          'lat=${lat.toStringAsFixed(4)} lon=${lon.toStringAsFixed(4)} '
-          'tx=$transmissionType connected=${_mqtt.isConnected}');
+      debugPrint('📤 [Publish] bundle sent — status_live=$statusLive '
+          'sensor=$sensorData lat=${lat.toStringAsFixed(4)} '
+          'lon=${lon.toStringAsFixed(4)} tx=$transmissionType '
+          'connected=${_mqtt.isConnected}');
     }
   }
 

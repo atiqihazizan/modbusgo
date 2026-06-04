@@ -7,6 +7,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
+import '../constants/tracking_publish_config.dart';
+
 class LocationFix {
   const LocationFix({
     required this.latitude,
@@ -35,26 +37,24 @@ class LocationService {
   Stream<LocationFix> get stream => _controller.stream;
   LocationFix? get lastFix => _last;
 
-  /// Tolak fix terlalu kasar (Wi‑Fi/cell) supaya koordinat tidak “melantun”.
-  static const double maxAcceptableAccuracyMeters = 80;
-
   LocationSettings _streamSettings() {
+    final filter = TrackingPublishConfig.locationDistanceFilterMeters;
     if (!kIsWeb && Platform.isAndroid) {
       return AndroidSettings(
         accuracy: LocationAccuracy.best,
-        distanceFilter: 5,
+        distanceFilter: filter,
         forceLocationManager: true,
       );
     }
     if (!kIsWeb && Platform.isIOS) {
       return AppleSettings(
         accuracy: LocationAccuracy.best,
-        distanceFilter: 5,
+        distanceFilter: filter,
       );
     }
-    return const LocationSettings(
+    return LocationSettings(
       accuracy: LocationAccuracy.best,
-      distanceFilter: 5,
+      distanceFilter: filter,
     );
   }
 
@@ -91,7 +91,7 @@ class LocationService {
   bool _accuracyOk(Position pos) {
     final acc = pos.accuracy;
     if (acc.isNaN || acc < 0) return true;
-    return acc <= maxAcceptableAccuracyMeters;
+    return acc <= TrackingPublishConfig.maxAcceptableAccuracyMeters;
   }
 
   /// Pastikan servis lokasi hidup + permission diberi.
@@ -127,7 +127,7 @@ class LocationService {
   /// One-shot fix untuk provisioning. WAJIB ada — kalau gagal, return null.
   /// [timeout] had masa tunggu fix.
   Future<LocationFix?> getCurrentFix({
-    Duration timeout = const Duration(seconds: 20),
+    Duration timeout = TrackingPublishConfig.locationTimeoutDefault,
   }) async {
     final err = await ensureReady();
     if (err != null) {
@@ -142,9 +142,9 @@ class LocationService {
         if (remaining <= Duration.zero) break;
         final pos = await Geolocator.getCurrentPosition(
           locationSettings: _oneShotSettings(
-            remaining < const Duration(seconds: 8)
+            remaining < TrackingPublishConfig.locationOneShotPollChunkMin
                 ? remaining
-                : const Duration(seconds: 12),
+                : TrackingPublishConfig.locationOneShotPollChunkMax,
           ),
         );
         if (best == null || pos.accuracy < best.accuracy) {

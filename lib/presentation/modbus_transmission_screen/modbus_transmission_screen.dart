@@ -84,7 +84,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     _pollInterval = Duration(milliseconds: _device.pollInterval);
     _tabController = TabController(length: 2, vsync: this);
     _loadGlobalRxTimeout(); // isi _responseTimeout dari tetapan global
-    PublishService().pauseGps(); // Modbus pegang kawalan publish
+    PublishService().setTransmissionScreenActive(true);
     LocationService().start(); // pastikan lastFix sentiasa segar untuk publishModbus
     _rebuildCommand(); // jana commandText + _sendableCommand + registerValues
     // Auto-connect bila masuk skrin (BLE sahaja buat masa ni).
@@ -110,7 +110,8 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
       ),
     );
     _transport?.disconnect();
-    PublishService().resumeGps(); // sambung semula GPS publish
+    if (isLooping) PublishService().resumeGps();
+    PublishService().setTransmissionScreenActive(false);
     _tabController.dispose();
     super.dispose();
   }
@@ -209,6 +210,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
   /// Dipanggil bila transport putus di tengah sesi (cabut kuasa, keluar julat).
   void _handleTransportLost() {
     if (!mounted) return;
+    if (isLooping) onStopLoop();
     _nextPollTimer?.cancel();
     _rxTimeoutTimer?.cancel();
     _awaitingRx = false;
@@ -233,6 +235,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
   }
 
   void onDisconnect() {
+    if (isLooping) onStopLoop();
     _nextPollTimer?.cancel();
     _rxTimeoutTimer?.cancel();
     _awaitingRx = false;
@@ -253,6 +256,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     _nextPollTimer?.cancel();
     _rxTimeoutTimer?.cancel();
     _awaitingRx = false;
+    PublishService().pauseGps();
     setState(() => isLooping = true);
     _kickPollCycle();
   }
@@ -263,6 +267,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     _rxTimeoutTimer?.cancel();
     _rxTimeoutTimer = null;
     _awaitingRx = false;
+    PublishService().resumeGps();
     if (mounted) setState(() => isLooping = false);
   }
 
