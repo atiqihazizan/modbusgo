@@ -87,15 +87,15 @@ class BleConnectionService {
   static String _serviceHint(AdvertisementData ad) {
     for (final g in ad.serviceUuids) {
       final s = g.toString().toLowerCase();
-      if (s.contains('6e400001')) return 'Nordic UART · sesuai Modbus BLE';
+      if (s.contains('6e400001')) return 'Nordic UART · suitable for Modbus BLE';
       if (s.contains('ffe0') || s.contains('ff00')) {
-        return 'Serial BLE · kemungkinan Modbus';
+        return 'Serial BLE · possible Modbus';
       }
     }
     if (ad.serviceUuids.isNotEmpty) {
-      return 'BLE · ${ad.serviceUuids.length} servis GATT';
+      return 'BLE · ${ad.serviceUuids.length} GATT services';
     }
-    return 'BLE · boleh disambung';
+    return 'BLE · connectable';
   }
 
   static String _displayLabel(ScanResult r, int listIndex) {
@@ -107,7 +107,7 @@ class BleConnectionService {
     if (adv.isNotEmpty && !_macPattern.hasMatch(adv)) {
       return adv;
     }
-    return 'Peranti BLE #$listIndex';
+    return 'BLE device #$listIndex';
   }
 
   static String _macFromScanResult(ScanResult r) {
@@ -168,7 +168,7 @@ class BleConnectionService {
         timeout: timeout,
         androidUsesFineLocation: false,
       );
-      if (kDebugMode) debugPrint('🔵 [BLE] scan tamat (gen=$gen)');
+      if (kDebugMode) debugPrint('🔵 [BLE] scan finished (gen=$gen)');
     } catch (e) {
       if (kDebugMode) debugPrint('❌ [BLE] startScan: $e');
       rethrow;
@@ -187,6 +187,77 @@ class BleConnectionService {
     } catch (_) {}
   }
 
+  static bool _uuidContains(String uuid, String fragment) {
+    final u = uuid.toLowerCase().replaceAll('-', '');
+    final f = fragment.toLowerCase().replaceAll('-', '');
+    return u.contains(f);
+  }
+
+  /// Skor write char — utamakan Nordic UART RX / serial BLE (selari lib lama).
+  static int _writeCharScore(BluetoothCharacteristic c) {
+    if (!c.properties.write && !c.properties.writeWithoutResponse) return 0;
+    final u = c.uuid.toString();
+    if (_uuidContains(u, '6e400002')) return 100;
+    if (_uuidContains(u, 'ffe0') || _uuidContains(u, 'fff2')) return 90;
+    return c.properties.write ? 60 : 50;
+  }
+
+  /// Skor notify/read — utamakan notify + UUID TX serial (elak char read generik GAP).
+  static int _notifyCharScore(BluetoothCharacteristic c) {
+    final u = c.uuid.toString();
+    if (c.properties.notify) {
+      if (_uuidContains(u, '6e400003')) return 100;
+      if (_uuidContains(u, 'ffe1') || _uuidContains(u, 'fff1')) return 90;
+      return 70;
+    }
+    if (c.properties.indicate) return 40;
+    if (c.properties.read) return 5;
+    return 0;
+  }
+
+  static ({BluetoothCharacteristic? write, BluetoothCharacteristic? notify})
+      pickModbusCharacteristics(List<BluetoothService> services) {
+    BluetoothCharacteristic? writeChar;
+    BluetoothCharacteristic? notifyChar;
+    var bestWrite = 0;
+    var bestNotify = 0;
+
+    for (final s in services) {
+      for (final c in s.characteristics) {
+        final ws = _writeCharScore(c);
+        if (ws > bestWrite) {
+          bestWrite = ws;
+          writeChar = c;
+        }
+        final ns = _notifyCharScore(c);
+        if (ns > bestNotify) {
+          bestNotify = ns;
+          notifyChar = c;
+        }
+      }
+    }
+
+    // Fallback seperti lib: char write/notify terakhir jika tiada skor tinggi.
+    if (writeChar == null || notifyChar == null || bestNotify < 10) {
+      BluetoothCharacteristic? lastWrite;
+      BluetoothCharacteristic? lastNotify;
+      for (final s in services) {
+        for (final c in s.characteristics) {
+          if (c.properties.write || c.properties.writeWithoutResponse) {
+            lastWrite = c;
+          }
+          if (c.properties.notify || c.properties.indicate) {
+            lastNotify = c;
+          }
+        }
+      }
+      writeChar ??= lastWrite;
+      notifyChar ??= lastNotify;
+    }
+
+    return (write: writeChar, notify: notifyChar);
+  }
+
   /// Connect + discover device tertentu (dari hasil scan). Cache transport.
   Future<BleConnectResult> connectDevice(BluetoothDevice device) async {
     try {
@@ -194,35 +265,28 @@ class BleConnectionService {
       await device.connect(timeout: const Duration(seconds: 20));
       final services = await device.discoverServices();
 
-      BluetoothCharacteristic? writeChar;
-      BluetoothCharacteristic? readChar;
-      for (final s in services) {
-        for (final c in s.characteristics) {
-          if (writeChar == null &&
-              (c.properties.write || c.properties.writeWithoutResponse)) {
-            writeChar = c;
-          }
-          if (readChar == null && (c.properties.notify || c.properties.read)) {
-            readChar = c;
-          }
-        }
-      }
+      final picked = pickModbusCharacteristics(services);
+      final writeChar = picked.write;
+      final readChar = picked.notify;
       if (writeChar == null || readChar == null) {
         await device.disconnect();
         return const BleConnectResult(
-            error: 'Characteristic write/read tak dijumpai');
+            error: 'Write/read characteristic not found');
       }
 
       final transport = BleModbusTransport(device, writeChar, readChar);
       await transport.startListening();
       _active[normBleAddress(device.remoteId.str)] = transport;
       if (kDebugMode) {
-        debugPrint('✅ [BLE] Connected ${normBleAddress(device.remoteId.str)}');
+        debugPrint(
+          '✅ [BLE] Connected ${normBleAddress(device.remoteId.str)} '
+          'write=${writeChar.uuid} notify=${readChar.uuid}',
+        );
       }
       return BleConnectResult(transport: transport);
     } catch (e) {
       if (kDebugMode) debugPrint('❌ [BLE] connectDevice: $e');
-      return BleConnectResult(error: 'Ralat sambungan: $e');
+      return BleConnectResult(error: 'Connection error: $e');
     }
   }
 
@@ -235,7 +299,7 @@ class BleConnectionService {
     if (cached != null) return BleConnectResult(transport: cached);
 
     if (!await ensureReady()) {
-      return const BleConnectResult(error: 'Bluetooth tidak aktif/disokong');
+      return const BleConnectResult(error: 'Bluetooth is off or not supported');
     }
     final want = normBleAddress(address);
     // Cuba dari peranti yang app dah connect.
@@ -265,12 +329,12 @@ class BleConnectionService {
         onTimeout: () => null,
       );
       if (target == null) {
-        return BleConnectResult(error: 'Peranti $address tak dijumpai');
+        return BleConnectResult(error: 'Device $address not found');
       }
       return connectDevice(target);
     } catch (e) {
       if (kDebugMode) debugPrint('❌ [BLE] connectByAddress scan: $e');
-      return BleConnectResult(error: 'Scan gagal: $e');
+      return BleConnectResult(error: 'Scan failed: $e');
     } finally {
       await sub.cancel();
       await stopScan();

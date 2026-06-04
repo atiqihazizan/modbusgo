@@ -32,7 +32,7 @@ class WifiConnectionCache {
     final t = WifiModbusTransport();
     final ok = await t.connect(ip, port);
     if (!ok) {
-      return WifiConnectResult(error: 'Gagal sambung ke $ip:$port');
+      return WifiConnectResult(error: 'Failed to connect to $ip:$port');
     }
     _active[_key(ip, port)] = t;
     if (kDebugMode) debugPrint('✅ [WiFi] Cached $ip:$port');

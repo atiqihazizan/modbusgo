@@ -6,6 +6,9 @@
 //   - Keluar skrin Transmission → resumeGps(): GPS-change publish sambung semula.
 //   - Data Modbus masuk → publishModbus(): baca lat/lon segar, publish sensor sebenar.
 //   - GPS berubah (luar skrin) → publishGps(): sensor_data [-1] (tiada data sensor).
+//   - Keluar app / background / pop Transmission → publishExitSnapshot(): semua medan
+//     penting (lat/lon, speed, heading, bateri, suhu, …); sensor_data ikut konteks
+//     (Modbus aktif → nilai sensor semasa, else [-1]).
 //
 // Service ini TIDAK menggantikan MqttService/LocationService — ia membungkus
 // keduanya supaya logik bina-payload + kawalan pause berada di SATU tempat.
@@ -58,6 +61,22 @@ class PublishService {
   bool _gpsPaused = false;
   bool get isGpsPaused => _gpsPaused;
 
+  /// Skrin Transmission aktif — untuk sertakan sensor cache bila app ke background.
+  bool _modbusTransmissionActive = false;
+  bool get isModbusTransmissionActive => _modbusTransmissionActive;
+
+  /// Salinan payload sensor Modbus terakhir (untuk publish keluar skrin).
+  List<dynamic>? get lastModbusSensorPayload =>
+      _lastModbusSensorPayload == null
+          ? null
+          : List<dynamic>.from(_lastModbusSensorPayload!);
+
+  List<dynamic>? _lastModbusSensorPayload;
+  String _lastModbusTransmissionType = 'Unknown';
+
+  DateTime _lastExitPublish = DateTime.fromMillisecondsSinceEpoch(0);
+  static const Duration _exitPublishDebounce = Duration(seconds: 4);
+
   // Throttle GPS publish — elak spam bila fix masuk laju. Modbus TIDAK di-throttle
   // di sini sebab kadarnya dikawal oleh polling loop transport.
   DateTime _lastGpsPublish = DateTime.fromMillisecondsSinceEpoch(0);
@@ -80,12 +99,14 @@ class PublishService {
   /// Masuk skrin Transmission — tahan GPS-change publish.
   void pauseGps() {
     _gpsPaused = true;
-    if (kDebugMode) debugPrint('⏸️ [Publish] GPS publish paused (Modbus aktif)');
+    _modbusTransmissionActive = true;
+    if (kDebugMode) debugPrint('⏸️ [Publish] GPS publish paused (Modbus active)');
   }
 
   /// Keluar skrin Transmission — sambung GPS-change publish.
   void resumeGps() {
     _gpsPaused = false;
+    _modbusTransmissionActive = false;
     if (kDebugMode) debugPrint('▶️ [Publish] GPS publish resumed');
   }
 
@@ -140,7 +161,7 @@ class PublishService {
 
     if (f == null) {
       if (kDebugMode) {
-        debugPrint('⚠️ [Publish] snapshot skip — tiada GPS fix');
+        debugPrint('⚠️ [Publish] snapshot skip — no GPS fix');
       }
       return false;
     }
@@ -191,10 +212,13 @@ class PublishService {
     // KEPUTUSAN: tiada fix langsung → SKIP publish (jujur, jangan tipu KL).
     if (fix == null) {
       if (kDebugMode) {
-        debugPrint('⚠️ [Publish] Modbus skip — tiada GPS fix langsung');
+        debugPrint('⚠️ [Publish] Modbus skip — no GPS fix available');
       }
       return false;
     }
+
+    _lastModbusSensorPayload = List<dynamic>.from(sensorData);
+    _lastModbusTransmissionType = transmissionType;
 
     _publish(
       latitude: fix.latitude,
@@ -204,6 +228,79 @@ class PublishService {
       sensorData: sensorData,
       transmissionType: transmissionType,
     );
+    return true;
+  }
+
+  // ---------------------------------------------------------------
+  // PUBLISH KELUAR / BACKGROUND (graceful exit — bukan force-kill)
+  // ---------------------------------------------------------------
+
+  /// Snapshot penuh untuk DB: lokasi, kelajuan, heading, bateri, suhu, dll.
+  /// [sensorData] null → [-1], kecuali Modbus aktif guna cache sensor terakhir.
+  /// Abaikan [pauseGps]; offline → queue MQTT.
+  Future<bool> publishExitSnapshot({
+    List<dynamic>? sensorData,
+    String? transmissionType,
+    String exitContext = 'exit',
+    Duration locTimeout = const Duration(seconds: 3),
+  }) async {
+    final now = DateTime.now();
+    if (now.difference(_lastExitPublish) < _exitPublishDebounce) {
+      if (kDebugMode) {
+        debugPrint('⏭️ [Publish] exit skip debounce ($exitContext)');
+      }
+      return false;
+    }
+
+    await _ensureMeta();
+    await DeviceMetricsService().refreshBattery();
+
+    LocationFix? fix = _location.lastFix;
+    if (fix == null) {
+      try {
+        fix = await _location
+            .getCurrentFix(timeout: locTimeout)
+            .timeout(locTimeout, onTimeout: () => null);
+      } catch (_) {
+        fix = null;
+      }
+    }
+
+    if (fix == null) {
+      if (kDebugMode) {
+        debugPrint('⚠️ [Publish] exit skip — no GPS ($exitContext)');
+      }
+      return false;
+    }
+
+    List<dynamic> sensors;
+    String txType;
+    if (sensorData != null) {
+      sensors = sensorData;
+      txType = transmissionType ?? _lastModbusTransmissionType;
+    } else if (_modbusTransmissionActive &&
+        _lastModbusSensorPayload != null &&
+        _lastModbusSensorPayload!.isNotEmpty) {
+      sensors = List<dynamic>.from(_lastModbusSensorPayload!);
+      txType = transmissionType ?? _lastModbusTransmissionType;
+    } else {
+      sensors = const [-1];
+      txType = transmissionType ?? 'GPS';
+    }
+
+    _lastExitPublish = now;
+    _publish(
+      latitude: fix.latitude,
+      longitude: fix.longitude,
+      speed: fix.speed,
+      heading: fix.heading,
+      sensorData: sensors,
+      transmissionType: txType,
+    );
+
+    if (kDebugMode) {
+      debugPrint('📤 [Publish] exit snapshot ($exitContext) sensor=$sensors');
+    }
     return true;
   }
 
@@ -223,7 +320,7 @@ class PublishService {
 
     if (latitude == null || longitude == null) {
       if (kDebugMode) {
-        debugPrint('⚠️ [Publish] skip — tiada latitude/longitude GPS');
+        debugPrint('⚠️ [Publish] skip — missing latitude/longitude');
       }
       return;
     }

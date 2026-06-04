@@ -284,10 +284,14 @@ class BleModbusTransport implements ModbusTransport {
     if (bytes == null) return false;
 
     try {
-      // withoutResponse ikut keupayaan characteristic (UART biasa writeWithoutResponse).
-      final useWithoutResp = _writeChar.properties.writeWithoutResponse &&
-          !_writeChar.properties.write;
-      await _writeChar.write(bytes, withoutResponse: useWithoutResp);
+      // Selari lib rujukan: write dengan response jika disokong.
+      if (_writeChar.properties.write) {
+        await _writeChar.write(bytes, withoutResponse: false);
+      } else if (_writeChar.properties.writeWithoutResponse) {
+        await _writeChar.write(bytes, withoutResponse: true);
+      } else {
+        return false;
+      }
       if (kDebugMode) debugPrint('📤 [BLE] Sent ${bytes.length} bytes');
       return true;
     } catch (e) {

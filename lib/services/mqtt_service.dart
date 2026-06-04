@@ -160,7 +160,7 @@ class MqttService {
   void _scheduleReconnect() {
     _reconnectTimer?.cancel();
     final delay = _backoffSec;
-    if (kDebugMode) debugPrint('🔄 [MQTT] Reconnect dalam ${delay}s');
+    if (kDebugMode) debugPrint('🔄 [MQTT] Reconnect in ${delay}s');
     _reconnectTimer = Timer(Duration(seconds: delay), () async {
       _backoffSec = (_backoffSec * 2).clamp(2, 60);
       await _createAndConnect();

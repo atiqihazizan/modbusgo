@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../presentation/home_screen/widgets/modbus_device_panel_widget.dart';
+import '../constants/modbus_data_format.dart';
 
 class ModbusStorageService {
   ModbusStorageService._internal();
@@ -48,8 +49,8 @@ class ModbusStorageService {
         isConnected: false, // runtime, sentiasa false bila load
         slaveId: m['slaveId'] as int? ?? 1,
         functionCode: m['functionCode'] as String? ?? 'FC03',
-        dataType: m['dataType'] as String? ?? 'INT16',
-        byteOrder: m['byteOrder'] as String? ?? 'Big Endian',
+        dataType: normalizeDataFormat(m['dataType'] as String? ?? 'decimal'),
+        byteOrder: kDefaultModbusByteOrder,
         startAddress: m['startAddress'] as int? ?? 0,
         registerCount: m['registerCount'] as int? ?? 2,
         pollInterval: m['pollInterval'] as int? ?? 1000,

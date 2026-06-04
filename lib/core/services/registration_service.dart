@@ -1,3 +1,4 @@
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
@@ -41,6 +42,14 @@ class AgencyOption {
   final String code;
   final String name;
   const AgencyOption({required this.id, required this.code, required this.name});
+}
+
+/// Boot / restore outcome when local credentials are missing.
+enum BootRestoreResult {
+  success,
+  notRegistered,
+  offline,
+  networkError,
 }
 
 class RegistrationService {
@@ -219,12 +228,13 @@ class RegistrationService {
     }
   }
 
-  // After reinstall: restore agency_token + device info from /check.
-  Future<bool> restoreFromBackend() async {
-    final result = await checkDevice();
-    if (result == null || !result.exists || result.device == null) return false;
+  /// True when device has Wi‑Fi or mobile data (not airplane / none only).
+  Future<bool> hasInternetConnection() async {
+    final conn = await Connectivity().checkConnectivity();
+    return !conn.contains(ConnectivityResult.none);
+  }
 
-    final d = result.device!;
+  Future<void> _persistDeviceFromCheck(Map<String, dynamic> d) async {
     final token = d['agency_token'] as String?;
     final name = d['name'] as String?;
     final agencyId = d['agency_id'] is int ? d['agency_id'] as int : null;
@@ -242,6 +252,27 @@ class RegistrationService {
       await _storage.saveDeviceInfo(deviceId: id, name: name);
     }
     await _storage.saveNeedApproval(needApproval);
+  }
+
+  // After reinstall: restore agency_token + device info from /check.
+  Future<bool> restoreFromBackend() async {
+    final result = await checkDevice();
+    if (result == null || !result.exists || result.device == null) return false;
+    await _persistDeviceFromCheck(result.device!);
     return true;
+  }
+
+  /// Boot path when local token/device info missing — needs network to restore.
+  Future<BootRestoreResult> bootRestoreFromBackend() async {
+    if (!await hasInternetConnection()) {
+      return BootRestoreResult.offline;
+    }
+    final result = await checkDevice();
+    if (result == null) return BootRestoreResult.networkError;
+    if (!result.exists || result.device == null) {
+      return BootRestoreResult.notRegistered;
+    }
+    await _persistDeviceFromCheck(result.device!);
+    return BootRestoreResult.success;
   }
 }

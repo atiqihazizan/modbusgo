@@ -12,6 +12,7 @@ import '../../core/services/modbus_storage_service.dart';
 import '../../core/services/location_service.dart';
 import '../../core/services/publish_service.dart';
 import '../../core/services/wifi_connection_cache.dart';
+import '../../core/constants/modbus_data_format.dart';
 import '../../core/transport/modbus_frame.dart';
 import '../../core/transport/modbus_transport.dart';
 import '../../theme/app_theme.dart';
@@ -97,51 +98,38 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     _awaitingRx = false;
     _rxSub?.cancel();
     _connSub?.cancel();
+    final txType =
+        widget.device.connectionType == ModbusConnectionType.bluetooth
+            ? 'Bluetooth'
+            : 'WiFi';
+    unawaited(
+      PublishService().publishExitSnapshot(
+        sensorData: _sensorPayloadForExit(),
+        transmissionType: txType,
+        exitContext: 'transmit_leave',
+      ),
+    );
     _transport?.disconnect();
     PublishService().resumeGps(); // sambung semula GPS publish
     _tabController.dispose();
     super.dispose();
   }
 
-  // ── Helper: Jana arahan Modbus RTU hex ────────────────────────────────────
-  String _buildHexCommand(ModbusDevice device) {
-    // Contoh: FC03 → Read Holding Registers
-    // Format: [SlaveID][FC][AddrHi][AddrLo][CountHi][CountLo][CRC_placeholder]
-    final slaveHex = device.slaveId
-        .toRadixString(16)
-        .padLeft(2, '0')
-        .toUpperCase();
-    final fcMap = {
-      'FC01': '01',
-      'FC02': '02',
-      'FC03': '03',
-      'FC04': '04',
-      'FC05': '05',
-      'FC06': '06',
-    };
-    final fc = fcMap[device.functionCode] ?? '03';
-    final addrHi = (device.startAddress >> 8)
-        .toRadixString(16)
-        .padLeft(2, '0')
-        .toUpperCase();
-    final addrLo = (device.startAddress & 0xFF)
-        .toRadixString(16)
-        .padLeft(2, '0')
-        .toUpperCase();
-    final cntHi = (device.registerCount >> 8)
-        .toRadixString(16)
-        .padLeft(2, '0')
-        .toUpperCase();
-    final cntLo = (device.registerCount & 0xFF)
-        .toRadixString(16)
-        .padLeft(2, '0')
-        .toUpperCase();
-    return '$slaveHex $fc $addrHi$addrLo $cntHi$cntLo [CRC]';
+  /// Nilai sensor semasa untuk publish keluar skrin Transmission.
+  List<dynamic> _sensorPayloadForExit() {
+    if (registerValues.isNotEmpty &&
+        registerValues.any((v) => v != 0)) {
+      return registerValues.map((v) => v).toList();
+    }
+    final cached = PublishService().lastModbusSensorPayload;
+    if (cached != null && cached.isNotEmpty) {
+      return cached;
+    }
+    return const [-1];
   }
 
   /// Jana semula arahan + senarai register dari _device semasa.
   void _rebuildCommand() {
-    commandText = _buildHexCommand(_device);
     try {
       _sendableCommand = buildReadCommandFromUi(
         slaveId: _device.slaveId,
@@ -149,8 +137,10 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
         startAddress: _device.startAddress,
         registerCount: _device.registerCount,
       );
+      commandText = formatRtuHexForDisplay(_sendableCommand);
     } catch (_) {
       _sendableCommand = '';
+      commandText = '';
     }
     registerValues = List.filled(_device.registerCount, 0);
   }
@@ -182,7 +172,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
       if (!result.ok) {
         setState(() => isConnected = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result.error ?? 'Sambungan gagal')),
+          SnackBar(content: Text(result.error ?? 'Connection failed')),
         );
         return;
       }
@@ -192,7 +182,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
       if (ep == null) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Format address WiFi tidak sah (ip:port)')),
+          const SnackBar(content: Text('Invalid WiFi address format (ip:port)')),
         );
         return;
       }
@@ -202,7 +192,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
       if (!result.ok) {
         setState(() => isConnected = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result.error ?? 'Sambungan gagal')),
+          SnackBar(content: Text(result.error ?? 'Connection failed')),
         );
         return;
       }
@@ -228,7 +218,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     });
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Sambungan terputus. Tekan reconnect untuk cuba semula.'),
+        content: Text('Connection lost. Tap reconnect to try again.'),
         backgroundColor: AppTheme.errorColor,
       ),
     );
@@ -296,6 +286,9 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     if (t == null || !isLooping) return;
     if (_awaitingRx) return;
 
+    _awaitingRx = true;
+    _rxTimeoutTimer?.cancel();
+
     final ok = await t.sendHexCommand(_sendableCommand);
     if (!mounted || !isLooping) return;
 
@@ -323,8 +316,6 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
       return;
     }
 
-    _awaitingRx = true;
-    _rxTimeoutTimer?.cancel();
     _rxTimeoutTimer = Timer(_responseTimeout, () {
       if (!mounted || !isLooping || !_awaitingRx) return;
       _finishPollCycle(
@@ -380,12 +371,14 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
       decoded = decodeRegisters(
         raw,
         dataType: dataTypeFromString(widget.device.dataType),
-        byteOrder: byteOrderFromString(widget.device.byteOrder),
+        byteOrder: byteOrderFromString(kDefaultModbusByteOrder),
       );
     }
 
     setState(() {
-      if (!synthetic) lastResponse = resp.response;
+      if (!synthetic) {
+        lastResponse = formatRtuHexForDisplay(resp.response);
+      }
       if (!resp.isError && decoded.isNotEmpty) registerValues = decoded;
       txRxLog.insert(
         0,
@@ -419,8 +412,8 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
       name: result['name'] as String,
       slaveId: result['slaveId'] as int,
       functionCode: result['functionCode'] as String,
-      dataType: result['dataType'] as String,
-      byteOrder: result['byteOrder'] as String,
+      dataType: normalizeDataFormat(result['dataType'] as String),
+      byteOrder: kDefaultModbusByteOrder,
       startAddress: result['startAddress'] as int,
       registerCount: result['registerCount'] as int,
       pollInterval: result['pollInterval'] as int? ?? _device.pollInterval,
@@ -440,7 +433,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     if (wasLooping) onStartLoop(); // mula semula guna nilai baharu
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Tetapan dikemas kini.')),
+      const SnackBar(content: Text('Settings updated.')),
     );
   }
 
@@ -458,7 +451,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     Clipboard.setData(ClipboardData(text: text));
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text('Disalin ke clipboard'),
+        content: const Text('Copied to clipboard'),
         backgroundColor: AppTheme.success,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -546,13 +539,13 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
               size: 22,
               color: AppTheme.errorColor,
             ),
-            tooltip: 'Sambung semula',
+            tooltip: 'Reconnect',
             onPressed: _reconnect,
           ),
         // Butang tetapan Modbus
         IconButton(
           icon: const CustomIconWidget(iconName: 'settings', size: 22),
-          tooltip: 'Tetapan Modbus',
+          tooltip: 'Modbus settings',
           onPressed: onOpenSettings,
         ),
         // Butang Send/Stop toggle
@@ -575,7 +568,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
                       color: colorScheme.primary,
                     ),
             ),
-            tooltip: isLooping ? 'Hentikan polling' : 'Mula polling',
+            tooltip: isLooping ? 'Stop polling' : 'Start polling',
             onPressed: _toggleLoop,
           ),
         ),
@@ -672,7 +665,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Arahan Hex',
+                      'Hex command',
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 11.sp > 12 ? 12 : 11.sp,
                         fontWeight: FontWeight.w600,
@@ -716,7 +709,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Respons Terakhir',
+                        'Last response',
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 11.sp > 12 ? 12 : 11.sp,
                           fontWeight: FontWeight.w600,
@@ -762,7 +755,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
                         borderRadius: BorderRadius.circular(6.0),
                       ),
                       child: Text(
-                        'R${e.key}: ${e.value}',
+                        'R${e.key}: ${formatRegisterValueForDisplay(e.value, widget.device.dataType)}',
                         style: GoogleFonts.sourceCodePro(
                           fontSize: 11.sp > 12 ? 12 : 11.sp,
                           color: AppTheme.primary,
@@ -825,7 +818,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     if (txRxLog.isEmpty) {
       return _buildEmptyState(
         icon: 'swap_horiz',
-        message: 'Tiada log lagi.\nMula polling untuk melihat data TX/RX.',
+        message: 'No logs yet.\nStart polling to see TX/RX data.',
         colorScheme: colorScheme,
       );
     }
@@ -912,7 +905,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     if (registerValues.isEmpty) {
       return _buildEmptyState(
         icon: 'grid_view',
-        message: 'Tiada nilai register.\nMula polling untuk membaca data.',
+        message: 'No register values.\nStart polling to read data.',
         colorScheme: colorScheme,
       );
     }
@@ -965,7 +958,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
           SizedBox(height: 0.5.h),
           // Nilai yang didekod
           Text(
-            value.toString(),
+            formatRegisterValueForDisplay(value, widget.device.dataType),
             style: GoogleFonts.sourceCodePro(
               fontSize: 14.sp > 16 ? 16 : 14.sp,
               fontWeight: FontWeight.w700,

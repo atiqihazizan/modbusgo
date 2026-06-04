@@ -6,6 +6,8 @@ import 'package:sizer/sizer.dart';
 
 import '../core/app_export.dart';
 import '../core/services/device_metrics_service.dart';
+import '../core/services/mqtt_service.dart';
+import '../core/services/publish_service.dart';
 import '../widgets/custom_error_widget.dart';
 
 void main() async {
@@ -38,8 +40,37 @@ void main() async {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      unawaited(
+        PublishService().publishExitSnapshot(exitContext: 'app_background'),
+      );
+    }
+    if (state == AppLifecycleState.resumed) {
+      MqttService().resumeReconnect();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

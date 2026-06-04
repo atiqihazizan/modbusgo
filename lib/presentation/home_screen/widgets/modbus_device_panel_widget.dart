@@ -7,6 +7,7 @@ import '../../../core/app_export.dart';
 import '../../../widgets/common/app_card.dart';
 
 import '../../../core/services/ble_connection_service.dart';
+import '../../../core/constants/modbus_data_format.dart';
 import '../../../core/services/modbus_storage_service.dart';
 import '../../../core/services/wifi_connection_cache.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -218,7 +219,7 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Device dengan address "$addr" dah wujud'),
+            content: Text('A device with address "$addr" already exists'),
             backgroundColor: AppTheme.errorColor,
             behavior: SnackBarBehavior.floating,
           ),
@@ -237,8 +238,8 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
         isConnected: false,
         slaveId: result['slaveId'] as int,
         functionCode: result['functionCode'] as String,
-        dataType: result['dataType'] as String,
-        byteOrder: result['byteOrder'] as String,
+        dataType: normalizeDataFormat(result['dataType'] as String),
+        byteOrder: kDefaultModbusByteOrder,
         startAddress: result['startAddress'] as int,
         registerCount: result['registerCount'] as int,
         pollInterval: result['pollInterval'] as int? ?? 1000,
@@ -281,8 +282,8 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
       address: result['address'] as String,
       slaveId: result['slaveId'] as int,
       functionCode: result['functionCode'] as String,
-      dataType: result['dataType'] as String,
-      byteOrder: result['byteOrder'] as String,
+      dataType: normalizeDataFormat(result['dataType'] as String),
+      byteOrder: kDefaultModbusByteOrder,
       startAddress: result['startAddress'] as int,
       registerCount: result['registerCount'] as int,
       pollInterval: result['pollInterval'] as int? ?? 1000,
@@ -332,7 +333,7 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
     if (!await svc.ensureReady()) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Bluetooth tidak aktif')),
+          const SnackBar(content: Text('Bluetooth is not enabled')),
         );
       }
       return null;
@@ -360,7 +361,7 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
     if (!res.ok) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(res.error ?? 'Sambungan gagal')),
+          SnackBar(content: Text(res.error ?? 'Connection failed')),
         );
       }
       return null;
@@ -395,7 +396,7 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
     if (!res.ok) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(res.error ?? 'Sambungan gagal')),
+          SnackBar(content: Text(res.error ?? 'Connection failed')),
         );
       }
       return null;
@@ -905,11 +906,15 @@ class _DeviceTile extends StatelessWidget {
                         ),
                         _SubtitleChip(
                             label: device.functionCode, theme: theme),
-                        _SubtitleChip(label: device.dataType, theme: theme),
                         _SubtitleChip(
-                          label: device.byteOrder.split(' ').first,
+                          label: dataFormatDisplayLabel(device.dataType),
                           theme: theme,
                         ),
+                        // Byte order — disorok; default Big Endian dalam decode.
+                        // _SubtitleChip(
+                        //   label: device.byteOrder.split(' ').first,
+                        //   theme: theme,
+                        // ),
                       ],
                     ),
                     // Baris 3: IP / MAC — dipindah ke subtitle tajuk (di atas)
@@ -1124,8 +1129,7 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
   late final TextEditingController _pollIntervalCtrl;
 
   late String _selectedFunctionCode;
-  late String _selectedDataType;
-  late String _selectedByteOrder;
+  late String _selectedDataFormat;
 
   final _functionCodes = [
     'FC01',
@@ -1135,21 +1139,6 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
     'FC05',
     'FC06',
     'FC16',
-  ];
-  final _dataTypes = [
-    'INT16',
-    'UINT16',
-    'INT32',
-    'UINT32',
-    'FLOAT32',
-    'FLOAT64',
-    'BOOL',
-  ];
-  final _byteOrders = [
-    'Big Endian',
-    'Little Endian',
-    'Big Endian Swap',
-    'Little Endian Swap',
   ];
 
   bool get _isWifi => widget.connectionType == ModbusConnectionType.wifi;
@@ -1184,14 +1173,21 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
     _nameCtrl = TextEditingController(text: defaultName);
     _addressCtrl = TextEditingController(text: addressText);
     _slaveIdCtrl = TextEditingController(text: d?.slaveId.toString() ?? '1');
-    _startAddrCtrl = TextEditingController(text: '0x0000');
+    _startAddrCtrl = TextEditingController(
+      text: d != null
+          ? '0x${d.startAddress.toRadixString(16).padLeft(4, '0').toUpperCase()}'
+          : '0x0000',
+    );
     _lengthCtrl = TextEditingController(
-      text: (d?.registerCount ?? 10).toString(),
+      text: (d?.registerCount ??
+              defaultRegisterCountForDataFormat(
+                d?.dataType ?? 'decimal',
+              ))
+          .toString(),
     );
     _pollIntervalCtrl = TextEditingController(text: (d?.pollInterval ?? 1000).toString());
     _selectedFunctionCode = d?.functionCode ?? 'FC03';
-    _selectedDataType = d?.dataType ?? 'INT16';
-    _selectedByteOrder = d?.byteOrder ?? 'Big Endian';
+    _selectedDataFormat = normalizeDataFormat(d?.dataType ?? 'decimal');
   }
 
   @override
@@ -1215,8 +1211,8 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
       'address': _addressCtrl.text.trim(),
       'slaveId': int.tryParse(_slaveIdCtrl.text) ?? 1,
       'functionCode': _selectedFunctionCode,
-      'dataType': _selectedDataType,
-      'byteOrder': _selectedByteOrder,
+      'dataType': normalizeDataFormat(_selectedDataFormat),
+      'byteOrder': kDefaultModbusByteOrder,
       'startAddress': _parseAddr(_startAddrCtrl.text), // ← TAMBAH
       'registerCount': int.tryParse(_lengthCtrl.text) ?? 2, // ← TAMBAH
       'pollInterval': int.tryParse(_pollIntervalCtrl.text.trim()) ?? 1000,
@@ -1400,23 +1396,14 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
                           ],
                         ),
                         const SizedBox(height: 16),
+                        // Byte order — disorok; decode guna Big Endian (Modbus standard).
                         // _DialogDropdown(
-                        //   label: 'Function Code',
-                        //   value: _selectedFunctionCode,
-                        //   items: _functionCodes,
-                        //   icon: 'code',
-                        //   onChanged: (v) =>
-                        //       setState(() => _selectedFunctionCode = v!),
+                        //   label: 'Byte Order',
+                        //   value: kDefaultModbusByteOrder,
+                        //   items: _byteOrders,
+                        //   icon: 'swap_horiz',
+                        //   onChanged: (_) {},
                         // ),
-                        _DialogDropdown(
-                          label: 'Byte Order',
-                          value: _selectedByteOrder,
-                          items: _byteOrders,
-                          icon: 'swap_horiz',
-                          onChanged: (v) =>
-                              setState(() => _selectedByteOrder = v!),
-                        ),                      
-                        const SizedBox(height: 16),
                         Row(
                           children: [
                             Expanded(
@@ -1432,25 +1419,22 @@ class _ModbusSettingsDialogState extends State<_ModbusSettingsDialog> {
                             const SizedBox(width: 10),
                             Expanded(
                               child: _DialogDropdown(
-                                label: 'Data Type',
-                                value: _selectedDataType,
-                                items: _dataTypes,
+                                label: 'Data format',
+                                value: _selectedDataFormat,
+                                items: kModbusDataFormatOptions,
                                 icon: 'data_object',
-                                onChanged: (v) =>
-                                    setState(() => _selectedDataType = v!),
+                                formatItemLabel: dataFormatDisplayLabel,
+                                onChanged: (v) {
+                                  if (v == null) return;
+                                  setState(() {
+                                    _selectedDataFormat = v;
+                                    _lengthCtrl.text =
+                                        defaultRegisterCountForDataFormat(v)
+                                            .toString();
+                                  });
+                                },
                               ),
                             ),
-                            // const SizedBox(width: 10),
-                            // Expanded(
-                            //   child: _DialogDropdown(
-                            //     label: 'Byte Order',
-                            //     value: _selectedByteOrder,
-                            //     items: _byteOrders,
-                            //     icon: 'swap_horiz',
-                            //     onChanged: (v) =>
-                            //         setState(() => _selectedByteOrder = v!),
-                            //   ),
-                            // ),
                           ],
                         ),
                       ],
@@ -1594,6 +1578,7 @@ class _DialogDropdown extends StatelessWidget {
   final List<String> items;
   final String icon;
   final ValueChanged<String?> onChanged;
+  final String Function(String item)? formatItemLabel;
 
   const _DialogDropdown({
     required this.label,
@@ -1601,6 +1586,7 @@ class _DialogDropdown extends StatelessWidget {
     required this.items,
     required this.icon,
     required this.onChanged,
+    this.formatItemLabel,
   });
 
   @override
@@ -1633,7 +1619,10 @@ class _DialogDropdown extends StatelessWidget {
           .map(
             (item) => DropdownMenuItem(
               value: item,
-              child: Text(item, overflow: TextOverflow.ellipsis),
+              child: Text(
+                formatItemLabel?.call(item) ?? item,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           )
           .toList(),
@@ -1716,7 +1705,7 @@ class _BleScanDialogState extends State<_BleScanDialog> {
       // actionsPadding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
       title: Row(
         children: [
-          const Text('Pilih Peranti BLE'),
+          const Text('Select BLE Device'),
           const Spacer(),
           if (_scanning)
             const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
@@ -1724,7 +1713,7 @@ class _BleScanDialogState extends State<_BleScanDialog> {
             IconButton(
               icon: const Icon(Icons.refresh, size: 20),
               onPressed: _scanning ? null : _start,
-              tooltip: 'Scan semula',
+              tooltip: 'Scan again',
             ),
         ],
       ),
@@ -1744,7 +1733,7 @@ class _BleScanDialogState extends State<_BleScanDialog> {
             ? Padding(
                 padding: const EdgeInsets.all(16),
                 child: Text(
-                  _scanning ? 'Mengimbas…' : 'Tiada peranti dijumpai',
+                  _scanning ? 'Scanning…' : 'No devices found',
                   style: theme.textTheme.bodyMedium,
                 ),
               )
@@ -1813,7 +1802,7 @@ class _BleScanDialogState extends State<_BleScanDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Batal'),
+          child: const Text('Cancel'),
         ),
       ],
     );
@@ -1850,7 +1839,7 @@ class _WifiConnectDialogState extends State<_WifiConnectDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Sambung WiFi / TCP'),
+      title: const Text('Connect WiFi / TCP'),
       content: Form(
         key: _formKey,
         child: Column(
@@ -1873,8 +1862,8 @@ class _WifiConnectDialogState extends State<_WifiConnectDialog> {
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
-        FilledButton(onPressed: _ok, child: const Text('Sambung')),
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(onPressed: _ok, child: const Text('Connect')),
       ],
     );
   }

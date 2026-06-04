@@ -126,6 +126,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     mqtt.onConnectionChanged = (connected) {
       if (!mounted) return;
+      if (connected) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+      }
       setState(() => _isOnline = connected);
       if (connected) {
         unawaited(_tryInitialHomePublish());
@@ -134,19 +137,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     mqtt.onReconnectExhausted = () {
       if (!mounted) return;
       setState(() => _isOnline = false);
-      ScaffoldMessenger.of(context).showSnackBar(
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.clearSnackBars();
+      messenger.showSnackBar(
         SnackBar(
           content: const Text(
-            'MQTT gagal sambung selepas 5 percubaan. '
-            'Sila reconnect manual di skrin Profile.',
+            'MQTT failed to connect after 5 attempts. '
+            'Will retry when the app returns to the foreground.',
           ),
           backgroundColor: Colors.orange.shade800,
           behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 4),
+          duration: const Duration(days: 1),
           action: SnackBarAction(
-            label: 'PROFILE',
+            label: 'Close',
             textColor: Colors.white,
-            onPressed: () => context.push(AppRoutes.profileScreen),
+            onPressed: () {
+              messenger.hideCurrentSnackBar();
+            },
           ),
         ),
       );
@@ -249,7 +256,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'GPS belum tersedia. Hidupkan GPS dan benarkan lokasi tepat.',
+              'GPS is not available. Turn on GPS and allow precise location.',
             ),
             behavior: SnackBarBehavior.floating,
           ),
@@ -333,6 +340,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         backgroundColor: theme.colorScheme.surface,
         elevation: 0,
         scrolledUnderElevation: 2,
+        title: Text(
+          _agencyName.toUpperCase(),
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w800,
+            // fontSize: 16,
+            letterSpacing: 0.3,
+            color: theme.colorScheme.onSurface,
+          ),
+        ),
         actions: [
           IconButton(
             onPressed: () => context.push(AppRoutes.profileScreen),

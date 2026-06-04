@@ -89,7 +89,7 @@ class MqttService {
     _exhausted = false;
     _reconnectAttempts = 0;
     _backoffSec = 2;
-    if (kDebugMode) debugPrint('🔁 [MQTT] Manual reconnect dimulakan');
+    if (kDebugMode) debugPrint('🔁 [MQTT] Manual reconnect started');
     await _createAndConnect();
   }
 
@@ -99,7 +99,7 @@ class MqttService {
     if (_deviceId == null) return;
     if (isConnected) return;
     if (_exhausted) {
-      if (kDebugMode) debugPrint('▶️ [MQTT] Resume — cuba reconnect semula');
+      if (kDebugMode) debugPrint('▶️ [MQTT] Resume — retrying reconnect');
       await manualReconnect();
     }
   }
@@ -193,7 +193,7 @@ class MqttService {
     if (_reconnectAttempts >= _maxReconnectAttempts) {
       _exhausted = true;
       if (kDebugMode) {
-        debugPrint('🛑 [MQTT] Reconnect habis ($_maxReconnectAttempts x)');
+        debugPrint('🛑 [MQTT] Reconnect attempts exhausted ($_maxReconnectAttempts)');
       }
       onReconnectExhausted?.call();
       return;
@@ -204,7 +204,7 @@ class MqttService {
     onReconnectAttempt?.call(_reconnectAttempts, _maxReconnectAttempts);
     if (kDebugMode) {
       debugPrint(
-        '🔄 [MQTT] Reconnect #$_reconnectAttempts/$_maxReconnectAttempts dalam ${delay}s',
+        '🔄 [MQTT] Reconnect #$_reconnectAttempts/$_maxReconnectAttempts in ${delay}s',
       );
     }
     _reconnectTimer = Timer(Duration(seconds: delay), () async {

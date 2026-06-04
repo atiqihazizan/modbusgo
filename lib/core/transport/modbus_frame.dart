@@ -12,6 +12,8 @@
 
 import 'dart:typed_data';
 
+import '../constants/modbus_data_format.dart';
+
 // ===================================================================
 // PEMETA String (UI) → int / enum
 // ===================================================================
@@ -20,28 +22,22 @@ import 'dart:typed_data';
 int functionCodeToInt(String fc) {
   final cleaned = fc.toUpperCase().replaceAll('FC', '').trim();
   final v = int.tryParse(cleaned);
-  if (v == null) throw ArgumentError('Function code tak sah: $fc');
+  if (v == null) throw ArgumentError('Invalid function code: $fc');
   return v;
 }
 
 enum ModbusDataType { int16, uint16, int32, uint32, float32, float64, boolType }
 
 ModbusDataType dataTypeFromString(String s) {
-  switch (s.toUpperCase()) {
-    case 'INT16':
+  switch (normalizeDataFormat(s)) {
+    case 'decimal':
       return ModbusDataType.int16;
-    case 'UINT16':
+    case 'hexadecimal':
       return ModbusDataType.uint16;
-    case 'INT32':
-      return ModbusDataType.int32;
-    case 'UINT32':
-      return ModbusDataType.uint32;
-    case 'FLOAT32':
-      return ModbusDataType.float32;
-    case 'FLOAT64':
-      return ModbusDataType.float64;
-    case 'BOOL':
+    case 'binary':
       return ModbusDataType.boolType;
+    case 'float':
+      return ModbusDataType.float32;
     default:
       return ModbusDataType.int16;
   }
@@ -50,6 +46,8 @@ ModbusDataType dataTypeFromString(String s) {
 enum ModbusByteOrder { bigEndian, littleEndian, bigEndianSwap, littleEndianSwap }
 
 ModbusByteOrder byteOrderFromString(String s) {
+  // UI byte order disorok — default Big Endian (Modbus standard per register).
+  if (s.trim().isEmpty) return ModbusByteOrder.bigEndian;
   switch (s.toLowerCase()) {
     case 'little endian':
       return ModbusByteOrder.littleEndian;
@@ -87,6 +85,17 @@ List<int> _crc16(List<int> bytes) {
 
 String _hex2(int v) => (v & 0xFF).toRadixString(16).padLeft(2, '0').toUpperCase();
 
+/// RTU hex padat → paparan bait demi bait: `01 03 00 00 00 02 C4 0B`.
+String formatRtuHexForDisplay(String compactHex) {
+  final clean = compactHex.replaceAll(RegExp(r'\s+'), '').toUpperCase();
+  if (clean.isEmpty || clean.length.isOdd) return compactHex;
+  final parts = <String>[];
+  for (var i = 0; i < clean.length; i += 2) {
+    parts.add(clean.substring(i, i + 2));
+  }
+  return parts.join(' ');
+}
+
 // ===================================================================
 // BINA FRAME (hex RTU) untuk operasi READ (FC 1-4)
 // ===================================================================
@@ -101,7 +110,7 @@ String buildReadCommand({
   required int registerCount,
 }) {
   if (functionCode < 1 || functionCode > 4) {
-    throw ArgumentError('buildReadCommand hanya untuk FC01-04, dapat $functionCode');
+    throw ArgumentError('buildReadCommand only supports FC01-04, got $functionCode');
   }
   final frame = <int>[
     slaveId & 0xFF,

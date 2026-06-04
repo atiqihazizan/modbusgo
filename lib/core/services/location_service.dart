@@ -99,7 +99,7 @@ class LocationService {
   Future<String?> ensureReady() async {
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
-      return 'Location services are disabled. Sila hidupkan GPS.';
+      return 'Location services are disabled. Please turn on GPS.';
     }
     var permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
@@ -109,7 +109,7 @@ class LocationService {
       }
     }
     if (permission == LocationPermission.deniedForever) {
-      return 'Location permission permanently denied. Sila benarkan dalam tetapan.';
+      return 'Location permission permanently denied. Please enable it in Settings.';
     }
     if (!kIsWeb && Platform.isAndroid) {
       if (permission == LocationPermission.whileInUse ||
@@ -117,7 +117,7 @@ class LocationService {
         // Pastikan fine location (bukan coarse sahaja) pada Android 12+.
         final precise = await Geolocator.getLocationAccuracy();
         if (precise == LocationAccuracyStatus.reduced) {
-          return 'Lokasi tepat dimatikan. Sila benarkan "Precise location" dalam tetapan.';
+          return 'Precise location is off. Please enable "Precise location" in Settings.';
         }
       }
     }
@@ -131,7 +131,7 @@ class LocationService {
   }) async {
     final err = await ensureReady();
     if (err != null) {
-      if (kDebugMode) debugPrint('📍 [Location] ensureReady gagal: $err');
+      if (kDebugMode) debugPrint('📍 [Location] ensureReady failed: $err');
       return null;
     }
     try {
@@ -160,7 +160,7 @@ class LocationService {
       if (best != null) {
         if (kDebugMode) {
           debugPrint(
-            '📍 [Location] guna fix terbaik (accuracy=${best.accuracy.toStringAsFixed(0)}m)',
+            '📍 [Location] using best fix (accuracy=${best.accuracy.toStringAsFixed(0)}m)',
           );
         }
         final fix = _fixFromPosition(best);
@@ -169,7 +169,7 @@ class LocationService {
       }
       return null;
     } catch (e) {
-      if (kDebugMode) debugPrint('📍 [Location] getCurrentFix gagal: $e');
+      if (kDebugMode) debugPrint('📍 [Location] getCurrentFix failed: $e');
       return null;
     }
   }
@@ -178,7 +178,7 @@ class LocationService {
   Future<void> start() async {
     final err = await ensureReady();
     if (err != null) {
-      if (kDebugMode) debugPrint('📍 [Location] start dibatalkan: $err');
+      if (kDebugMode) debugPrint('📍 [Location] start cancelled: $err');
       return;
     }
     _sub?.cancel();
@@ -188,7 +188,7 @@ class LocationService {
         if (!_accuracyOk(pos)) {
           if (kDebugMode) {
             debugPrint(
-              '📍 [Location] skip fix kasar accuracy=${pos.accuracy.toStringAsFixed(0)}m',
+              '📍 [Location] skip coarse fix accuracy=${pos.accuracy.toStringAsFixed(0)}m',
             );
           }
           return;

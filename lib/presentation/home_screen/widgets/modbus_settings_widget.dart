@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/constants/modbus_data_format.dart';
 import '../../../core/app_export.dart';
 import '../../../widgets/common/app_card.dart';
 
@@ -23,8 +24,7 @@ class _ModbusSettingsWidgetState extends State<ModbusSettingsWidget> {
   final _retryCtrl = TextEditingController(text: '3');
 
   String _selectedFunctionCode = 'FC03 — Read Holding Registers';
-  String _selectedDataType = 'INT16';
-  String _selectedByteOrder = 'Big Endian (AB CD)';
+  String _selectedDataFormat = 'decimal';
 
   final _functionCodes = [
     'FC01 — Read Coils',
@@ -34,24 +34,6 @@ class _ModbusSettingsWidgetState extends State<ModbusSettingsWidget> {
     'FC05 — Write Single Coil',
     'FC06 — Write Single Register',
     'FC16 — Write Multiple Registers',
-  ];
-
-  final _dataTypes = [
-    'INT16',
-    'UINT16',
-    'INT32',
-    'UINT32',
-    'FLOAT32',
-    'FLOAT64',
-    'BOOL',
-    'STRING',
-  ];
-
-  final _byteOrders = [
-    'Big Endian (AB CD)',
-    'Little Endian (CD AB)',
-    'Big Endian Byte Swap (BA DC)',
-    'Little Endian Byte Swap (DC BA)',
   ];
 
   @override
@@ -268,22 +250,20 @@ class _ModbusSettingsWidgetState extends State<ModbusSettingsWidget> {
                             ),
                             const SizedBox(height: 12),
                             _DropdownField(
-                              label: 'Data Type',
-                              value: _selectedDataType,
-                              items: _dataTypes,
+                              label: 'Data format',
+                              value: _selectedDataFormat,
+                              items: kModbusDataFormatOptions,
                               icon: 'data_object',
+                              itemLabel: dataFormatDisplayLabel,
                               onChanged: (v) =>
-                                  setState(() => _selectedDataType = v!),
+                                  setState(() => _selectedDataFormat = v!),
                             ),
-                            const SizedBox(height: 12),
-                            _DropdownField(
-                              label: 'Byte Order',
-                              value: _selectedByteOrder,
-                              items: _byteOrders,
-                              icon: 'swap_horiz',
-                              onChanged: (v) =>
-                                  setState(() => _selectedByteOrder = v!),
-                            ),
+                            // Byte order — disorok; default Big Endian.
+                            // const SizedBox(height: 12),
+                            // _DropdownField(
+                            //   label: 'Byte Order',
+                            //   ...
+                            // ),
                             const SizedBox(height: 20),
 
                             // Save button
@@ -405,6 +385,7 @@ class _DropdownField extends StatelessWidget {
   final List<String> items;
   final String icon;
   final ValueChanged<String?> onChanged;
+  final String Function(String item)? itemLabel;
 
   const _DropdownField({
     required this.label,
@@ -412,6 +393,7 @@ class _DropdownField extends StatelessWidget {
     required this.items,
     required this.icon,
     required this.onChanged,
+    this.itemLabel,
   });
 
   @override
@@ -442,7 +424,10 @@ class _DropdownField extends StatelessWidget {
           .map(
             (item) => DropdownMenuItem(
               value: item,
-              child: Text(item, overflow: TextOverflow.ellipsis),
+              child: Text(
+                itemLabel?.call(item) ?? item,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           )
           .toList(),

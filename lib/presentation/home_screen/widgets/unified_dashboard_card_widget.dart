@@ -75,6 +75,7 @@ class UnifiedDashboardCardWidget extends StatelessWidget {
             onRefreshGps: onRefreshGps,
             onManualEmit: onManualEmit,
             isEmitting: isEmitting,
+            coordinates: coordinates,
           ),
 
           // ── Bottom Bar: GPS + Status + Speed ───────────────────────
@@ -96,6 +97,7 @@ class UnifiedDashboardCardWidget extends StatelessWidget {
 class _AgencyRow extends StatelessWidget {
   final String agencyName;
   final String agencyCode;
+  final String coordinates;
   final VoidCallback onRefreshGps;
   final VoidCallback onManualEmit;
   final bool isEmitting;
@@ -103,6 +105,7 @@ class _AgencyRow extends StatelessWidget {
   const _AgencyRow({
     required this.agencyName,
     required this.agencyCode,
+    required this.coordinates,
     required this.onRefreshGps,
     required this.onManualEmit,
     required this.isEmitting,
@@ -112,64 +115,84 @@ class _AgencyRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
       child: Row(
         children: [
           // Agency name — bold, prominent
+          // Expanded(
+          //   // child: Text(
+          //   //   agencyName.isNotEmpty ? agencyName : '—',
+          //   //   style: theme.textTheme.titleMedium?.copyWith(
+          //   //     fontSize: 14,
+          //   //     fontWeight: FontWeight.w800,
+          //   //     letterSpacing: 0.3,
+          //   //     color: theme.colorScheme.onSurface,
+          //   //   ),
+          //   //   maxLines: 1,
+          //   //   overflow: TextOverflow.ellipsis,
+          //   // ),
+          //   // child: Row(
+          //   //   children: [
+          //   //     // GO logo — transparent background
+          //   //     // SizedBox(width: 36, height: 36, child: SizedBox()),
+          //   //     // const SizedBox(width: 10),
+          //   //     Column(
+          //   //       crossAxisAlignment: CrossAxisAlignment.start,
+          //   //       children: [
+          //   //         Text(
+          //   //           _deviceName.toUpperCase(),
+          //   //           style: theme.textTheme.titleLarge?.copyWith(
+          //   //             fontWeight: FontWeight.w700,
+          //   //           ),
+          //   //         ),
+          //   //         Text(
+          //   //           _deviceId,
+          //   //           style: theme.textTheme.labelSmall?.copyWith(
+          //   //             color: theme.colorScheme.onSurfaceVariant,
+          //   //           ),
+          //   //         ),
+          //   //       ],
+          //   //     ),
+          //   //   ],
+          //   // ),
+          //   child: Column(
+          //     crossAxisAlignment: CrossAxisAlignment.start,
+          //     children: [
+          //       Text(
+          //         agencyName.isNotEmpty ? agencyName : '—',
+          //         style: theme.textTheme.titleLarge?.copyWith(
+          //           fontWeight: FontWeight.w700,
+          //         ),
+          //       ),
+          //       const SizedBox(height: 4),
+          //       Text(
+          //         agencyCode.isNotEmpty ? agencyCode.toUpperCase() : '-',
+          //         style: theme.textTheme.labelSmall?.copyWith(
+          //           color: theme.colorScheme.onSurfaceVariant,
+          //           fontSize: 9,
+          //         ),
+          //       ),
+          //     ],
+          //   ),
+          // ),
+          // GPS coordinates
+          CustomIconWidget(
+            iconName: 'location_on',
+            color: const Color.fromARGB(179, 7, 7, 7),
+            size: 20,
+          ),
+          const SizedBox(width: 4),
           Expanded(
-            // child: Text(
-            //   agencyName.isNotEmpty ? agencyName : '—',
-            //   style: theme.textTheme.titleMedium?.copyWith(
-            //     fontSize: 14,
-            //     fontWeight: FontWeight.w800,
-            //     letterSpacing: 0.3,
-            //     color: theme.colorScheme.onSurface,
-            //   ),
-            //   maxLines: 1,
-            //   overflow: TextOverflow.ellipsis,
-            // ),
-            // child: Row(
-            //   children: [
-            //     // GO logo — transparent background
-            //     // SizedBox(width: 36, height: 36, child: SizedBox()),
-            //     // const SizedBox(width: 10),
-            //     Column(
-            //       crossAxisAlignment: CrossAxisAlignment.start,
-            //       children: [
-            //         Text(
-            //           _deviceName.toUpperCase(),
-            //           style: theme.textTheme.titleLarge?.copyWith(
-            //             fontWeight: FontWeight.w700,
-            //           ),
-            //         ),
-            //         Text(
-            //           _deviceId,
-            //           style: theme.textTheme.labelSmall?.copyWith(
-            //             color: theme.colorScheme.onSurfaceVariant,
-            //           ),
-            //         ),
-            //       ],
-            //     ),
-            //   ],
-            // ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  agencyName.isNotEmpty ? agencyName : '—',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  agencyCode.isNotEmpty ? agencyCode.toUpperCase() : '-',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                    fontSize: 9,
-                  ),
-                ),
-              ],
+            child: Text(
+              coordinates,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.3,
+                color: theme.colorScheme.onSurface,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
           const SizedBox(width: 8),
@@ -227,7 +250,7 @@ class _StatusBar extends StatelessWidget {
           bottomRight: Radius.circular(12.0),
         ),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       // Zoom out: kecilkan kandungan automatik kalau tak cukup ruang.
       child: FittedBox(
         fit: BoxFit.scaleDown,
@@ -235,23 +258,23 @@ class _StatusBar extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min, // penting dalam FittedBox
           children: [
-            // GPS coordinates
-            CustomIconWidget(
-              iconName: 'location_on',
-              color: Colors.white70,
-              size: 12,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              _coordinatesDisplay(coordinates),
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: Colors.white,
-                fontSize: 9,
-                fontWeight: FontWeight.w500,
-                fontFeatures: [FontFeature.tabularFigures()],
-              ),
-            ),
-            const SizedBox(width: 14),
+            // // GPS coordinates
+            // CustomIconWidget(
+            //   iconName: 'location_on',
+            //   color: Colors.white70,
+            //   size: 12,
+            // ),
+            // const SizedBox(width: 4),
+            // Text(
+            //   _coordinatesDisplay(coordinates),
+            //   style: theme.textTheme.labelSmall?.copyWith(
+            //     color: Colors.white,
+            //     fontSize: 9,
+            //     fontWeight: FontWeight.w500,
+            //     fontFeatures: [FontFeature.tabularFigures()],
+            //   ),
+            // ),
+            // const SizedBox(width: 14),
             // Connection dot + label
             Container(
               width: 7,
@@ -272,7 +295,7 @@ class _StatusBar extends StatelessWidget {
                 letterSpacing: 0.8,
               ),
             ),
-            const SizedBox(width: 24),
+            const SizedBox(width: 34),
             // Speed / last emit
             CustomIconWidget(iconName: 'speed', color: Colors.white54, size: 14),
             const SizedBox(width: 4),
