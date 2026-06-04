@@ -8,6 +8,9 @@
 //   - Keluar app / background / pop Transmission → publishExitSnapshot(): semua medan
 //     penting (lat/lon, speed, heading, bateri, suhu, …); status_live 'offline';
 //     sensor_data ikut konteks (Modbus aktif → nilai sensor semasa, else [-1]).
+//   - Idle watchdog: selepas publish berjaya → timer 10s; jika tiada publish baru
+//     dan MQTT connected → heartbeat status_live idle setiap 3s (henti bila pauseGps
+//     atau publish online/offline).
 //
 // Service ini TIDAK menggantikan MqttService/LocationService — ia membungkus
 // keduanya supaya logik bina-payload + kawalan pause berada di SATU tempat.
@@ -93,6 +96,12 @@ class PublishService {
   double? _lastPublishedLat;
   double? _lastPublishedLon;
 
+  Timer? _idleWatchTimer;
+  Timer? _idleHeartbeatTimer;
+
+  /// Publish berjaya pertama dalam sesi guna [TrackingPublishConfig.idleWatchAfterLaunch].
+  bool _firstIdleWatchPending = true;
+
   bool _coordinatesChanged(double lat, double lon) {
     final eps = TrackingPublishConfig.coordinateChangeEpsilonDegrees;
     if (_lastPublishedLat == null || _lastPublishedLon == null) return true;
@@ -119,6 +128,7 @@ class PublishService {
   /// Start polling loop — tahan GPS-change publish supaya tidak bertindih Modbus.
   void pauseGps() {
     _gpsPaused = true;
+    _stopIdleScheduling();
     if (kDebugMode) {
       debugPrint('⏸️ [Publish] GPS-change held (polling active)');
     }
@@ -128,6 +138,122 @@ class PublishService {
   void resumeGps() {
     _gpsPaused = false;
     if (kDebugMode) debugPrint('▶️ [Publish] GPS-change resumed (polling stopped)');
+  }
+
+  // ---------------------------------------------------------------
+  // IDLE WATCHDOG (10s selepas publish → heartbeat idle 3s)
+  // ---------------------------------------------------------------
+
+  void _stopIdleHeartbeat() {
+    _idleHeartbeatTimer?.cancel();
+    _idleHeartbeatTimer = null;
+  }
+
+  void _stopIdleScheduling() {
+    _idleWatchTimer?.cancel();
+    _idleWatchTimer = null;
+    _stopIdleHeartbeat();
+  }
+
+  /// Sebelum hantar bundle: batalkan watchdog; henti interval kecuali publish idle.
+  void _onBeforePublish(String statusLive) {
+    _idleWatchTimer?.cancel();
+    _idleWatchTimer = null;
+    if (statusLive != PublishStatusLive.idle) {
+      _stopIdleHeartbeat();
+    }
+  }
+
+  /// Selepas bundle dihantar/queued: mulakan semula watchdog atau matikan semua.
+  void _onAfterSuccessfulPublish(String statusLive) {
+    if (statusLive == PublishStatusLive.offline || _gpsPaused) {
+      _stopIdleScheduling();
+      return;
+    }
+    final watch = _firstIdleWatchPending
+        ? TrackingPublishConfig.idleWatchAfterLaunch
+        : TrackingPublishConfig.idleWatchAfterPublish;
+    _firstIdleWatchPending = false;
+
+    _idleWatchTimer?.cancel();
+    _idleWatchTimer = Timer(watch, _onIdleWatchElapsed);
+    if (kDebugMode) {
+      debugPrint(
+        '⏱️ [Publish] idle watch ${watch.inSeconds}s '
+        '(after status_live=$statusLive)',
+      );
+    }
+  }
+
+  void _onIdleWatchElapsed() {
+    _idleWatchTimer = null;
+    if (_gpsPaused || !_mqtt.isConnected) {
+      if (kDebugMode) {
+        debugPrint(
+          '⏭️ [Publish] idle watch skip — '
+          'paused=$_gpsPaused connected=${_mqtt.isConnected}',
+        );
+      }
+      return;
+    }
+    _startIdleHeartbeat();
+  }
+
+  void _startIdleHeartbeat() {
+    if (_idleHeartbeatTimer != null) return;
+    if (_lastPublishedLat == null || _lastPublishedLon == null) return;
+
+    if (kDebugMode) {
+      debugPrint(
+        '💤 [Publish] idle heartbeat every '
+        '${TrackingPublishConfig.idleHeartbeatInterval.inSeconds}s',
+      );
+    }
+
+    unawaited(_ensureMeta());
+    _publishIdleHeartbeat();
+    _idleHeartbeatTimer = Timer.periodic(
+      TrackingPublishConfig.idleHeartbeatInterval,
+      (_) => _publishIdleHeartbeat(),
+    );
+  }
+
+  void _publishIdleHeartbeat() {
+    if (_gpsPaused || !_mqtt.isConnected) {
+      _stopIdleScheduling();
+      return;
+    }
+    final lat0 = _lastPublishedLat;
+    final lon0 = _lastPublishedLon;
+    if (lat0 == null || lon0 == null) return;
+
+    final fix = _location.lastFix;
+    final lat = fix?.latitude ?? lat0;
+    final lon = fix?.longitude ?? lon0;
+
+    if (_coordinatesChanged(lat, lon)) {
+      _stopIdleHeartbeat();
+      if (fix != null) {
+        _publish(
+          latitude: fix.latitude,
+          longitude: fix.longitude,
+          speed: fix.speed,
+          heading: fix.heading,
+          sensorData: const [-1],
+          statusLive: PublishStatusLive.online,
+        );
+      }
+      return;
+    }
+
+    _publish(
+      latitude: lat,
+      longitude: lon,
+      speed: fix?.speed ?? 0,
+      heading: fix?.heading,
+      sensorData: const [-1],
+      statusLive: PublishStatusLive.idle,
+    );
   }
 
   // ---------------------------------------------------------------
@@ -348,6 +474,7 @@ class PublishService {
     String transmissionType = 'Unknown',
     String statusLive = PublishStatusLive.online,
   }) {
+    _onBeforePublish(statusLive);
     unawaited(DeviceMetricsService().refreshBattery());
 
     if (latitude == null || longitude == null) {
@@ -391,6 +518,8 @@ class PublishService {
           'lon=${lon.toStringAsFixed(4)} tx=$transmissionType '
           'connected=${_mqtt.isConnected}');
     }
+
+    _onAfterSuccessfulPublish(statusLive);
   }
 
   /// Status sambungan (untuk UI indikator). Delegasi ke MqttService.

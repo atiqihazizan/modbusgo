@@ -7,6 +7,9 @@ abstract final class TrackingPublishConfig {
   static const String statusLiveOffline = 'offline';
 
   // --- Idle / publish timing (idle watchdog & heartbeat — logik guna nilai ini) ---
+  /// Publish pertama sesi (cth launch snapshot) — elak idle terlalu cepat.
+  static const Duration idleWatchAfterLaunch = Duration(seconds: 30);
+  /// Publish berikutnya dalam sesi yang sama.
   static const Duration idleWatchAfterPublish = Duration(seconds: 10);
   static const Duration idleHeartbeatInterval = Duration(seconds: 3);
   static const Duration gpsChangeMinGap = Duration(seconds: 3);
