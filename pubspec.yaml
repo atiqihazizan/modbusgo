@@ -32,6 +32,9 @@ dependencies:
   device_info_plus: ^11.5.0
   package_info_plus: ^8.1.2
   flutter_blue_plus: ^1.32.12
+  battery_plus: ^6.2.1
+  thermal: ^1.2.1
+  wakelock_plus: ^1.2.8
 
 dev_dependencies:
   flutter_test:    # CRITICAL: Required for Flutter project testing - DO NOT REMOVE

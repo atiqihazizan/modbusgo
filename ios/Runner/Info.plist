@@ -48,6 +48,12 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Aplikasi memerlukan lokasi untuk merekod kedudukan peranti.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>App perlu Bluetooth untuk sambung peranti Modbus.</string>
+	<string>App memerlukan Bluetooth untuk berhubung dengan peranti LoRa/Modbus.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>App memerlukan Bluetooth untuk berhubung dengan peranti LoRa/Modbus.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>App memerlukan akses rangkaian tempatan untuk berhubung dengan peranti Modbus melalui WiFi.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>App memerlukan akses kamera untuk mengimbas kod QR peranti.</string>
 </dict>
 </plist>

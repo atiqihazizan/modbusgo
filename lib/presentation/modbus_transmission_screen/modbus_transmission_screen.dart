@@ -60,10 +60,12 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
 
   ModbusTransport? _transport; // transport aktif (BLE buat masa ni)
   StreamSubscription<HexResponse>? _rxSub;
+  StreamSubscription<bool>? _connSub;
   Timer? _nextPollTimer;
   Timer? _rxTimeoutTimer;
   bool _awaitingRx = false; // TX dalam flight — tunggu RX/timeout sebelum poll seterusnya
-  late final Duration _pollInterval;
+  late ModbusDevice _device; // salinan boleh-ubah (boleh ditukar selepas edit)
+  Duration _pollInterval = const Duration(milliseconds: 1000);
   Duration _responseTimeout = const Duration(milliseconds: 1000); // global, dimuat async
   String _sendableCommand = ''; // hex RTU sebenar (ada CRC) untuk dihantar
 
@@ -77,26 +79,13 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
   @override
   void initState() {
     super.initState();
-    _pollInterval = Duration(milliseconds: widget.device.pollInterval);
+    _device = widget.device;
+    _pollInterval = Duration(milliseconds: _device.pollInterval);
     _tabController = TabController(length: 2, vsync: this);
     _loadGlobalRxTimeout(); // isi _responseTimeout dari tetapan global
     PublishService().pauseGps(); // Modbus pegang kawalan publish
     LocationService().start(); // pastikan lastFix sentiasa segar untuk publishModbus
-    // Jana arahan hex awal berdasarkan tetapan device
-    commandText = _buildHexCommand(widget.device);
-    // Jana command sebenar (RTU + CRC) untuk dihantar. commandText kekal utk paparan.
-    try {
-      _sendableCommand = buildReadCommandFromUi(
-        slaveId: widget.device.slaveId,
-        functionCode: widget.device.functionCode,
-        startAddress: widget.device.startAddress,
-        registerCount: widget.device.registerCount,
-      );
-    } catch (e) {
-      _sendableCommand = '';
-    }
-    // Inisialisasi senarai nilai register kosong
-    registerValues = List.filled(widget.device.registerCount, 0);
+    _rebuildCommand(); // jana commandText + _sendableCommand + registerValues
     // Auto-connect bila masuk skrin (BLE sahaja buat masa ni).
     WidgetsBinding.instance.addPostFrameCallback((_) => onConnect());
   }
@@ -107,6 +96,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     _rxTimeoutTimer?.cancel();
     _awaitingRx = false;
     _rxSub?.cancel();
+    _connSub?.cancel();
     _transport?.disconnect();
     PublishService().resumeGps(); // sambung semula GPS publish
     _tabController.dispose();
@@ -147,6 +137,22 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
         .padLeft(2, '0')
         .toUpperCase();
     return '$slaveHex $fc $addrHi$addrLo $cntHi$cntLo [CRC]';
+  }
+
+  /// Jana semula arahan + senarai register dari _device semasa.
+  void _rebuildCommand() {
+    commandText = _buildHexCommand(_device);
+    try {
+      _sendableCommand = buildReadCommandFromUi(
+        slaveId: _device.slaveId,
+        functionCode: _device.functionCode,
+        startAddress: _device.startAddress,
+        registerCount: _device.registerCount,
+      );
+    } catch (_) {
+      _sendableCommand = '';
+    }
+    registerValues = List.filled(_device.registerCount, 0);
   }
 
   // ── Format masa untuk log ──────────────────────────────────────────────────
@@ -203,7 +209,37 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
       _transport = result.transport;
     }
     _rxSub = _transport!.hexResponseStream.listen(_onRxResponse);
+    _connSub?.cancel();
+    _connSub = _transport!.connectionStateStream.listen((connected) {
+      if (!connected) _handleTransportLost();
+    });
     setState(() => isConnected = true);
+  }
+
+  /// Dipanggil bila transport putus di tengah sesi (cabut kuasa, keluar julat).
+  void _handleTransportLost() {
+    if (!mounted) return;
+    _nextPollTimer?.cancel();
+    _rxTimeoutTimer?.cancel();
+    _awaitingRx = false;
+    setState(() {
+      isConnected = false;
+      isLooping = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Sambungan terputus. Tekan reconnect untuk cuba semula.'),
+        backgroundColor: AppTheme.errorColor,
+      ),
+    );
+  }
+
+  /// Reconnect manual — bersihkan transport lama, cuba sambung semula.
+  Future<void> _reconnect() async {
+    _connSub?.cancel();
+    _rxSub?.cancel();
+    _transport = null;
+    await onConnect();
   }
 
   void onDisconnect() {
@@ -211,6 +247,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     _rxTimeoutTimer?.cancel();
     _awaitingRx = false;
     _rxSub?.cancel();
+    _connSub?.cancel();
     _transport?.disconnect();
     _transport = null;
     if (mounted) {
@@ -376,9 +413,9 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
   }
 
   Future<void> onOpenSettings() async {
-    final result = await showModbusEditDialog(context, widget.device);
+    final result = await showModbusEditDialog(context, _device);
     if (result == null || !mounted) return;
-    final updated = widget.device.copyWith(
+    final updated = _device.copyWith(
       name: result['name'] as String,
       slaveId: result['slaveId'] as int,
       functionCode: result['functionCode'] as String,
@@ -386,16 +423,24 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
       byteOrder: result['byteOrder'] as String,
       startAddress: result['startAddress'] as int,
       registerCount: result['registerCount'] as int,
-      pollInterval: result['pollInterval'] as int? ?? widget.device.pollInterval,
+      pollInterval: result['pollInterval'] as int? ?? _device.pollInterval,
     );
     await ModbusStorageService().update(updated);
     if (!mounted) return;
+
+    final wasLooping = isLooping;
+    if (wasLooping) onStopLoop(); // henti guna command lama
+
+    setState(() {
+      _device = updated;
+      _pollInterval = Duration(milliseconds: updated.pollInterval);
+      _rebuildCommand();
+    });
+
+    if (wasLooping) onStartLoop(); // mula semula guna nilai baharu
+
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Tetapan disimpan. Buka semula skrin untuk guna nilai baharu.',
-        ),
-      ),
+      const SnackBar(content: Text('Tetapan dikemas kini.')),
     );
   }
 
@@ -493,6 +538,17 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
             ),
           ),
         ),
+        // Butang reconnect — muncul bila terputus
+        if (!isConnected)
+          IconButton(
+            icon: const CustomIconWidget(
+              iconName: 'refresh',
+              size: 22,
+              color: AppTheme.errorColor,
+            ),
+            tooltip: 'Sambung semula',
+            onPressed: _reconnect,
+          ),
         // Butang tetapan Modbus
         IconButton(
           icon: const CustomIconWidget(iconName: 'settings', size: 22),

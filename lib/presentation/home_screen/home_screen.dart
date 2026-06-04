@@ -37,17 +37,44 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   StreamSubscription<LocationFix>? _locSub;
 
-  // Auto-publish throttle — elak spam bila GPS hantar fix laju.
-  DateTime _lastAutoPublish = DateTime.fromMillisecondsSinceEpoch(0);
-  static const Duration _autoPublishMinGap = Duration(seconds: 3);
+  /// Satu publish awal selepas MQTT connect (sesi Home ini); selepas itu GPS stream sahaja.
+  bool _initialHomePublishDone = false;
+  bool _initialHomePublishInFlight = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadDeviceInfo();
-    _startLocation();
-    _startMqtt(); // MQTT keep-online sejurus masuk home
+    unawaited(_bootstrapHome());
+  }
+
+  Future<void> _bootstrapHome() async {
+    await _startLocation();
+    await _startMqtt();
+    await _tryInitialHomePublish();
+  }
+
+  /// Publish sekali bila MQTT connected + GPS ada; offline → tunggu connect.
+  Future<void> _tryInitialHomePublish() async {
+    if (_initialHomePublishDone ||
+        _initialHomePublishInFlight ||
+        !mounted) {
+      return;
+    }
+    if (!MqttService().isConnected) return;
+
+    _initialHomePublishInFlight = true;
+    try {
+      final sent = await PublishService().publishCurrentSnapshot(
+        requireConnected: true,
+      );
+      if (!mounted || !sent) return;
+      _initialHomePublishDone = true;
+      setState(() => _lastEmit = 'Just now');
+    } finally {
+      _initialHomePublishInFlight = false;
+    }
   }
 
   @override
@@ -100,6 +127,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     mqtt.onConnectionChanged = (connected) {
       if (!mounted) return;
       setState(() => _isOnline = connected);
+      if (connected) {
+        unawaited(_tryInitialHomePublish());
+      }
     };
     mqtt.onReconnectExhausted = () {
       if (!mounted) return;
@@ -139,8 +169,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _coordinates = _fmtCoords(fix.latitude, fix.longitude);
         _isMoving = fix.speed > 0.5;
       });
-      // SEBELUM: _autoPublish(fix);
-      PublishService().publishGps(fix); // pintu tunggal + hormati pause
+      if (!_initialHomePublishDone) {
+        unawaited(_tryInitialHomePublish());
+        return;
+      }
+      PublishService().publishGps(fix);
     });
 
     // Show initial fix if already available.
@@ -150,33 +183,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// Auto-publish bila lokasi berubah. Throttle ringan elak spam.
-  /// Sensor data tiada → guna placeholder [-1] (sama macam manual emit).
-  void _autoPublish(LocationFix fix) {
-    final now = DateTime.now();
-    if (now.difference(_lastAutoPublish) < _autoPublishMinGap) return;
-    _lastAutoPublish = now;
-
-    final mqtt = MqttService();
-    mqtt.publishBundle({
-      'data_type': 'MG',
-      'latitude': fix.latitude,
-      'longitude': fix.longitude,
-      'speed': fix.speed,
-      if (fix.heading != null) 'heading': fix.heading,
-      'sensor_data': [-1],
-    });
-
-    if (mounted) {
-      setState(() {
-        _isOnline = mqtt.isConnected;
-        _lastEmit = mqtt.isConnected ? 'Auto · just now' : 'Queued (offline)';
-      });
-    }
-  }
-
   String _fmtCoords(double lat, double lon) {
-    return '${lat.abs().toStringAsFixed(4)}, ${lon.abs().toStringAsFixed(4)}';
+    return '${lat.toStringAsFixed(5)}, ${lon.toStringAsFixed(5)}';
   }
 
   Future<void> _onRefresh() async {
@@ -229,15 +237,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       await Future.delayed(const Duration(seconds: 2));
     }
 
-    final fix = LocationService().lastFix;
-    mqtt.publishBundle({
-      'data_type': 'MG',
-      'latitude': fix?.latitude ?? 3.1390,
-      'longitude': fix?.longitude ?? 101.6869,
-      'speed': fix?.speed ?? 0,
-      if (fix?.heading != null) 'heading': fix!.heading,
-      'sensor_data': [-1],
-    });
+    var fix = LocationService().lastFix;
+    if (fix == null ||
+        (fix.accuracy != null &&
+            fix.accuracy! > LocationService.maxAcceptableAccuracyMeters)) {
+      fix = await LocationService().getCurrentFix();
+    }
+    if (fix == null) {
+      if (mounted) {
+        setState(() => _isEmitting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'GPS belum tersedia. Hidupkan GPS dan benarkan lokasi tepat.',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+    await PublishService().publishManual(fix: fix);
 
     if (mounted) {
       final last = LocationService().lastFix;
@@ -273,9 +293,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _coordinates = _fmtCoords(fix.latitude, fix.longitude);
         _isMoving = fix.speed > 0.5;
       });
-      // Refresh manual juga publish satu fix segar.
-      _lastAutoPublish = DateTime.fromMillisecondsSinceEpoch(0);
-      _autoPublish(fix);
+      await PublishService().publishCurrentSnapshot(fix: fix);
+      if (!mounted) return;
+      setState(() {
+        _lastEmit = MqttService().isConnected
+            ? 'Just now'
+            : 'Queued (offline)';
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('GPS updated'),

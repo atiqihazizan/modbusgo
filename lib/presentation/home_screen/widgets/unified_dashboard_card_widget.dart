@@ -12,7 +12,7 @@ String _coordinatesDisplay(String coordinates) {
   final lat = double.tryParse(parts[0].trim());
   final lon = double.tryParse(parts[1].trim());
   if (lat == null || lon == null) return trimmed;
-  return '${lat.abs().toStringAsFixed(4)}, ${lon.abs().toStringAsFixed(4)}';
+  return '${lat.toStringAsFixed(5)}, ${lon.toStringAsFixed(5)}';
 }
 
 class UnifiedDashboardCardWidget extends StatelessWidget {

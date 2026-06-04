@@ -56,6 +56,9 @@ abstract class ModbusTransport {
   /// Status sambungan semasa.
   bool get isConnected;
 
+  /// Aliran status sambungan — emit false bila putus (untuk maklum UI).
+  Stream<bool> get connectionStateStream;
+
   /// Putuskan sambungan + bersihkan resource.
   Future<void> disconnect();
 }
@@ -99,6 +102,8 @@ class WifiModbusTransport implements ModbusTransport {
   final StreamController<HexResponse> _respController =
       StreamController<HexResponse>.broadcast();
   final List<HexResponse> _received = [];
+  final StreamController<bool> _connController =
+      StreamController<bool>.broadcast();
 
   @override
   Stream<HexResponse> get hexResponseStream => _respController.stream;
@@ -106,6 +111,8 @@ class WifiModbusTransport implements ModbusTransport {
   List<HexResponse> get receivedResponses => List.unmodifiable(_received);
   @override
   bool get isConnected => _connected && _socket != null;
+  @override
+  Stream<bool> get connectionStateStream => _connController.stream;
 
   /// Sambung TCP ke peranti WiFi (cth EW11A). Return true kalau berjaya.
   Future<bool> connect(
@@ -192,8 +199,10 @@ class WifiModbusTransport implements ModbusTransport {
   }
 
   void _handleDisconnect() {
+    final was = _connected;
     _connected = false;
     _socket = null;
+    if (was && !_connController.isClosed) _connController.add(false);
   }
 
   @override
@@ -203,6 +212,7 @@ class WifiModbusTransport implements ModbusTransport {
     } catch (_) {}
     _handleDisconnect();
     if (!_respController.isClosed) await _respController.close();
+    if (!_connController.isClosed) await _connController.close();
   }
 }
 
@@ -226,6 +236,8 @@ class BleModbusTransport implements ModbusTransport {
   final StreamController<HexResponse> _respController =
       StreamController<HexResponse>.broadcast();
   final List<HexResponse> _received = [];
+  final StreamController<bool> _connController =
+      StreamController<bool>.broadcast();
 
   @override
   Stream<HexResponse> get hexResponseStream => _respController.stream;
@@ -233,6 +245,8 @@ class BleModbusTransport implements ModbusTransport {
   List<HexResponse> get receivedResponses => List.unmodifiable(_received);
   @override
   bool get isConnected => _connected;
+  @override
+  Stream<bool> get connectionStateStream => _connController.stream;
 
   /// Mula dengar notify dari read characteristic. Panggil sekali selepas connect.
   Future<void> startListening() async {
@@ -240,7 +254,9 @@ class BleModbusTransport implements ModbusTransport {
 
     _stateSub = _device.connectionState.listen((state) {
       if (state == BluetoothConnectionState.disconnected) {
+        final was = _connected;
         _connected = false;
+        if (was && !_connController.isClosed) _connController.add(false);
       }
     });
 
@@ -292,5 +308,6 @@ class BleModbusTransport implements ModbusTransport {
     } catch (_) {}
     _connected = false;
     if (!_respController.isClosed) await _respController.close();
+    if (!_connController.isClosed) await _connController.close();
   }
 }

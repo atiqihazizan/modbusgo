@@ -11,11 +11,14 @@
 // keduanya supaya logik bina-payload + kawalan pause berada di SATU tempat.
 //
 // Payload kekal padan backend v3 (lihat MqttService.publishBundle):
-//   {data_type:'MG', latitude, longitude, speed, heading?, sensor_data:[...]}
+//   {data_type:'MG', latitude, longitude, speed, speed_unit, heading?, heading_unit?,
+//    cpu_temp?, cpu_temp_unit, battery_level?, battery_level_unit, thermal_status?, ...}
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 
+import '../constants/metric_units.dart';
 import 'device_identity_service.dart';
+import 'device_metrics_service.dart';
 import 'local_storage_service.dart';
 import 'location_service.dart';
 import 'mqtt_service.dart';
@@ -60,6 +63,16 @@ class PublishService {
   DateTime _lastGpsPublish = DateTime.fromMillisecondsSinceEpoch(0);
   static const Duration _gpsMinGap = Duration(seconds: 3);
 
+  double? _lastPublishedLat;
+  double? _lastPublishedLon;
+  static const double _coordEpsilon = 5e-5;
+
+  bool _coordinatesChanged(double lat, double lon) {
+    if (_lastPublishedLat == null || _lastPublishedLon == null) return true;
+    return (lat - _lastPublishedLat!).abs() > _coordEpsilon ||
+        (lon - _lastPublishedLon!).abs() > _coordEpsilon;
+  }
+
   // ---------------------------------------------------------------
   // KAWALAN PAUSE (dipanggil oleh skrin Transmission)
   // ---------------------------------------------------------------
@@ -85,6 +98,7 @@ class PublishService {
   /// Return true kalau publish dihantar; false kalau di-skip.
   bool publishGps(LocationFix fix) {
     if (_gpsPaused) return false;
+    if (!_coordinatesChanged(fix.latitude, fix.longitude)) return false;
 
     final now = DateTime.now();
     if (now.difference(_lastGpsPublish) < _gpsMinGap) return false;
@@ -100,17 +114,45 @@ class PublishService {
     return true;
   }
 
-  /// Publish manual (butang emit / refresh GPS). Abaikan pause & throttle —
-  /// user minta hantar terus. Guna lastFix kalau ada, fallback null-safe.
-  void publishManual({LocationFix? fix}) {
-    final f = fix ?? _location.lastFix;
+  /// Publish manual (butang emit). Delegasi ke [publishCurrentSnapshot].
+  Future<bool> publishManual({LocationFix? fix}) =>
+      publishCurrentSnapshot(fix: fix);
+
+  /// Snapshot lokasi semasa (emit manual, refresh GPS, publish awal Home).
+  /// Abaikan throttle koordinat; hormati [pauseGps]. Offline → queue kecuali
+  /// [requireConnected].
+  Future<bool> publishCurrentSnapshot({
+    LocationFix? fix,
+    Duration locTimeout = const Duration(seconds: 20),
+    bool requireConnected = false,
+  }) async {
+    if (_gpsPaused) return false;
+    if (requireConnected && !_mqtt.isConnected) return false;
+
+    await _ensureMeta();
+
+    var f = fix ?? _location.lastFix;
+    if (f == null ||
+        (f.accuracy != null &&
+            f.accuracy! > LocationService.maxAcceptableAccuracyMeters)) {
+      f = await _location.getCurrentFix(timeout: locTimeout);
+    }
+
+    if (f == null) {
+      if (kDebugMode) {
+        debugPrint('⚠️ [Publish] snapshot skip — tiada GPS fix');
+      }
+      return false;
+    }
+
     _publish(
-      latitude: f?.latitude,
-      longitude: f?.longitude,
-      speed: f?.speed ?? 0,
-      heading: f?.heading,
+      latitude: f.latitude,
+      longitude: f.longitude,
+      speed: f.speed,
+      heading: f.heading,
       sensorData: const [-1],
     );
+    return true;
   }
 
   // ---------------------------------------------------------------
@@ -177,9 +219,16 @@ class PublishService {
     required List<dynamic> sensorData,
     String transmissionType = 'Unknown',
   }) {
-    // Fallback koordinat ikut corak sedia ada (KL) bila tiada fix langsung.
-    final lat = latitude ?? 3.1390;
-    final lon = longitude ?? 101.6869;
+    unawaited(DeviceMetricsService().refreshBattery());
+
+    if (latitude == null || longitude == null) {
+      if (kDebugMode) {
+        debugPrint('⚠️ [Publish] skip — tiada latitude/longitude GPS');
+      }
+      return;
+    }
+    final lat = latitude;
+    final lon = longitude;
     final movingThreshold = 0.5; // m/s — selari home_screen
     final sendDt = DateTime.now().toString().substring(0, 19);
 
@@ -190,11 +239,12 @@ class PublishService {
       'status_live': 'online',
       'motion_status': speed > movingThreshold ? 'moving' : 'idle',
       'speed': speed,
+      'speed_unit': MetricUnits.metersPerSecond,
       if (heading != null) 'heading': heading,
-      'cpu_temp': 0.0, // telefon tak dedah suhu CPU sebenar
+      if (heading != null) 'heading_unit': MetricUnits.degrees,
       'latitude': lat,
       'longitude': lon,
-      'battery_level': 0, // skip buat masa ni
+      ...DeviceMetricsService().buildPayloadFields(),
       'transmission_type': transmissionType,
       'sensor_data': sensorData,
       'name': _deviceName ?? _nodeId ?? 'unknown',
@@ -202,6 +252,8 @@ class PublishService {
     };
 
     _mqtt.publishBundle(payload);
+    _lastPublishedLat = lat;
+    _lastPublishedLon = lon;
 
     if (kDebugMode) {
       debugPrint('📤 [Publish] bundle sent — sensor=$sensorData '
