@@ -8,6 +8,7 @@ import '../../../widgets/common/app_card.dart';
 
 import '../../../core/services/ble_connection_service.dart';
 import '../../../core/constants/modbus_data_format.dart';
+import '../../../core/services/modbus_runtime_service.dart';
 import '../../../core/services/modbus_storage_service.dart';
 import '../../../core/services/wifi_connection_cache.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -105,6 +106,7 @@ class ModbusDevicePanelWidget extends StatefulWidget {
 class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
     with WidgetsBindingObserver {
   final _storage = ModbusStorageService();
+  final _runtime = ModbusRuntimeService();
 
   List<ModbusDevice> _devices = [];
   // final Set<String> _expandedIds = {'dev-1'};
@@ -115,13 +117,22 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _runtime.addListener(_onRuntimeChanged);
+    unawaited(_runtime.ensureLoaded().then((_) {
+      if (mounted) setState(() {});
+    }));
     _loadDevices();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _runtime.removeListener(_onRuntimeChanged);
     super.dispose();
+  }
+
+  void _onRuntimeChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -320,6 +331,7 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
     );
     if (confirmed == true && mounted) {
       await _storage.remove(device.id);
+      await _runtime.remove(device.id);
       setState(() {
         _expandedIds.remove(device.id);
         _devices = _devices.where((d) => d.id != device.id).toList();
@@ -595,6 +607,7 @@ class _ModbusDevicePanelWidgetState extends State<ModbusDevicePanelWidget>
                 final isExpanded = _expandedIds.contains(device.id);
                 return _DeviceTile(
                   device: device,
+                  liveRegisterValues: _runtime.liveRegisterValues(device),
                   isExpanded: isExpanded,
                   onToggle: () {
                     setState(() {
@@ -783,6 +796,7 @@ class _SourceOption extends StatelessWidget {
 
 class _DeviceTile extends StatelessWidget {
   final ModbusDevice device;
+  final List<ModbusRegisterValue> liveRegisterValues;
   final bool isExpanded;
   final VoidCallback onToggle;
   final VoidCallback onTransmit;
@@ -791,6 +805,7 @@ class _DeviceTile extends StatelessWidget {
 
   const _DeviceTile({
     required this.device,
+    required this.liveRegisterValues,
     required this.isExpanded,
     required this.onToggle,
     required this.onTransmit,
@@ -808,7 +823,7 @@ class _DeviceTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final hasValues = device.isConnected && device.registerValues.isNotEmpty;
+    final hasValues = liveRegisterValues.isNotEmpty;
 
     return Column(
       children: [
@@ -1022,7 +1037,7 @@ class _DeviceTile extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 6),
-                      ...device.registerValues.map(
+                      ...liveRegisterValues.map(
                         (reg) => Padding(
                           padding: const EdgeInsets.only(bottom: 5),
                           child: Row(

@@ -8,6 +8,7 @@ import 'package:sizer/sizer.dart';
 import '../../core/app_export.dart';
 import '../../core/services/ble_connection_service.dart';
 import '../../core/services/local_storage_service.dart';
+import '../../core/services/modbus_runtime_service.dart';
 import '../../core/services/modbus_storage_service.dart';
 import '../../core/services/location_service.dart';
 import '../../core/services/publish_service.dart';
@@ -20,21 +21,6 @@ import '../../widgets/common/app_card.dart';
 import '../../widgets/custom_icon_widget.dart';
 import '../home_screen/widgets/modbus_device_panel_widget.dart';
 import '../home_screen/widgets/modbus_settings_widget.dart';
-
-// ─── Model: Satu entri dalam log TX/RX ───────────────────────────────────────
-class TxRxLogEntry {
-  final bool isTx; // true = hantar (TX), false = terima (RX)
-  final String data; // hex string atau data mentah
-  final DateTime time;
-  final bool isError; // papar merah jika ada ralat
-
-  const TxRxLogEntry({
-    required this.isTx,
-    required this.data,
-    required this.time,
-    this.isError = false,
-  });
-}
 
 // ─── Screen Utama ─────────────────────────────────────────────────────────────
 class ModbusTransmissionScreen extends StatefulWidget {
@@ -69,6 +55,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
   Duration _pollInterval = const Duration(milliseconds: 1000);
   Duration _responseTimeout = const Duration(milliseconds: 1000); // global, dimuat async
   String _sendableCommand = ''; // hex RTU sebenar (ada CRC) untuk dihantar
+  final _runtime = ModbusRuntimeService();
 
   Future<void> _loadGlobalRxTimeout() async {
     final ms = await LocalStorageService().getModbusRxTimeoutMs();
@@ -87,8 +74,33 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     PublishService().setTransmissionScreenActive(true);
     LocationService().start(); // pastikan lastFix sentiasa segar untuk publishModbus
     _rebuildCommand(); // jana commandText + _sendableCommand + registerValues
+    _loadPersistedRuntime();
     // Auto-connect bila masuk skrin (BLE sahaja buat masa ni).
     WidgetsBinding.instance.addPostFrameCallback((_) => onConnect());
+  }
+
+  Future<void> _loadPersistedRuntime() async {
+    final snap = await _runtime.loadSnapshot(_device.id);
+    if (!mounted || snap == null) return;
+    setState(() {
+      if (snap.registerNums.isNotEmpty) {
+        registerValues = List<num>.from(snap.registerNums);
+      }
+      if (snap.txRxLog.isNotEmpty) {
+        txRxLog = List<TxRxLogEntry>.from(snap.txRxLog);
+      }
+    });
+  }
+
+  void _appendTxRxLog(TxRxLogEntry entry) {
+    txRxLog.insert(0, entry);
+    if (txRxLog.length > ModbusRuntimeService.maxLogEntries) {
+      txRxLog.removeRange(
+        ModbusRuntimeService.maxLogEntries,
+        txRxLog.length,
+      );
+    }
+    unawaited(_runtime.appendLog(_device.id, entry));
   }
 
   @override
@@ -111,6 +123,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     );
     _transport?.disconnect();
     if (isLooping) PublishService().resumeGps();
+    if (_runtime.isPolling(_device.id)) _runtime.setPolling(null);
     PublishService().setTransmissionScreenActive(false);
     _tabController.dispose();
     super.dispose();
@@ -257,6 +270,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     _rxTimeoutTimer?.cancel();
     _awaitingRx = false;
     PublishService().pauseGps();
+    _runtime.setPolling(_device.id);
     setState(() => isLooping = true);
     _kickPollCycle();
   }
@@ -268,6 +282,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     _rxTimeoutTimer = null;
     _awaitingRx = false;
     PublishService().resumeGps();
+    if (_runtime.isPolling(_device.id)) _runtime.setPolling(null);
     if (mounted) setState(() => isLooping = false);
   }
 
@@ -297,17 +312,13 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     final ok = await t.sendHexCommand(_sendableCommand);
     if (!mounted || !isLooping) return;
 
-    setState(() {
-      txRxLog.insert(
-        0,
-        TxRxLogEntry(
-          isTx: true,
-          data: _sendableCommand,
-          time: DateTime.now(),
-          isError: !ok,
-        ),
-      );
-    });
+    final txEntry = TxRxLogEntry(
+      isTx: true,
+      data: _sendableCommand,
+      time: DateTime.now(),
+      isError: !ok,
+    );
+    setState(() => _appendTxRxLog(txEntry));
 
     if (!ok) {
       _finishPollCycle(
@@ -380,20 +391,21 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
       );
     }
 
+    final rxEntry = TxRxLogEntry(
+      isTx: false,
+      data: resp.response,
+      time: DateTime.now(),
+      isError: resp.isError,
+    );
     setState(() {
       if (!synthetic) {
         lastResponse = formatRtuHexForDisplay(resp.response);
       }
-      if (!resp.isError && decoded.isNotEmpty) registerValues = decoded;
-      txRxLog.insert(
-        0,
-        TxRxLogEntry(
-          isTx: false,
-          data: resp.response,
-          time: DateTime.now(),
-          isError: resp.isError,
-        ),
-      );
+      if (!resp.isError && decoded.isNotEmpty) {
+        registerValues = decoded;
+        unawaited(_runtime.saveRegisterNums(_device.id, decoded));
+      }
+      _appendTxRxLog(rxEntry);
     });
 
     List<dynamic> sensorPayload;
