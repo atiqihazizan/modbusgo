@@ -1,0 +1,642 @@
+<!-- =========================================================
+     SIMULATOR GEOFENCING — markers = devices dari /api/devices
+     - Boundary read-only, dimuat dari /api/boundaries
+     - Route disimpan ke /api/simulator-routes
+     - Record / Stop / Save per device
+     ========================================================= -->
+<div id="app" style="display:flex;height:100vh;font-family:system-ui,-apple-system,sans-serif;background:#f1f5f9">
+  <div style="width:320px;background:#fff;border-right:1px solid #e2e8f0;display:flex;flex-direction:column">
+    <div style="padding:16px;border-bottom:1px solid #e2e8f0">
+      <div style="font-size:18px;font-weight:700;color:#0f172a">GeoSite</div>
+      <div style="font-size:12px;color:#64748b">Demo Geofencing — Devices</div>
+    </div>
+
+    <div id="loginPanel" style="padding:12px;border-bottom:1px solid #e2e8f0;background:#f8fafc">
+      <div style="font-size:12px;font-weight:600;color:#475569;margin-bottom:8px">LOGIN API</div>
+      <input id="loginUser" type="text" placeholder="username" autocomplete="username" style="width:100%;padding:8px 10px;margin-bottom:6px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;box-sizing:border-box"/>
+      <input id="loginPass" type="password" placeholder="password" autocomplete="current-password" style="width:100%;padding:8px 10px;margin-bottom:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;box-sizing:border-box"/>
+      <button id="loginBtn" style="width:100%;padding:8px;border:none;border-radius:6px;background:#0f172a;color:#fff;font-weight:600;font-size:13px;cursor:pointer">Login</button>
+      <div id="loginStatus" style="margin-top:6px;font-size:11px;color:#64748b">Belum login — guna akaun React app</div>
+    </div>
+
+    <div style="padding:12px;display:flex;gap:8px;flex-wrap:wrap">
+      <button id="reloadBtn" style="flex:1;padding:10px;border:none;border-radius:8px;background:#2563eb;color:#fff;font-weight:600;font-size:13px;cursor:pointer">↻ Muat Devices</button>
+      <button id="playBtn" style="width:100%;padding:10px;border:none;border-radius:8px;background:#cbd5e1;color:#94a3b8;font-weight:600;font-size:13px;cursor:not-allowed" disabled>Pilih boundary untuk Play</button>
+    </div>
+
+    <div style="padding:8px 16px;font-size:12px;font-weight:600;color:#475569">SENARAI DEVICE</div>
+    <div id="workerList" style="flex:1;overflow-y:auto"></div>
+
+    <div style="border-top:1px solid #e2e8f0">
+      <div style="padding:8px 16px;font-size:12px;font-weight:600;color:#475569">BOUNDARY (klik pilih untuk Play)</div>
+      <div id="boundaryList" style="max-height:160px;overflow-y:auto;padding-bottom:8px"></div>
+    </div>
+  </div>
+
+  <div style="flex:1;position:relative">
+    <div id="map" style="height:100%;width:100%"></div>
+    <div id="hint" style="position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:1000;background:rgba(15,23,42,.85);color:#fff;padding:8px 16px;border-radius:20px;font-size:13px;pointer-events:none">
+      Pilih boundary, rakam laluan device, kemudian Play simulasi
+    </div>
+  </div>
+</div>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
+
+<script>
+const API_BASE = (() => {
+  const fromQs = new URLSearchParams(location.search).get('api');
+  const fallback = `${location.origin}/v2/api`;
+  return (fromQs || fallback).replace(/\/+$/, '');
+})();
+// Kunci sama dengan React app (authStore.js) — token dikongsi merentas /v2/*
+const AUTH_STORAGE_KEY = 'token';
+
+function isJwtLike(t) {
+  return typeof t === 'string' && t.split('.').length === 3 && t.startsWith('eyJ');
+}
+
+function readAuthToken() {
+  const fromQs = new URLSearchParams(location.search).get('token');
+  if (isJwtLike(fromQs)) {
+    localStorage.setItem(AUTH_STORAGE_KEY, fromQs);
+    return fromQs;
+  }
+  const saved = localStorage.getItem(AUTH_STORAGE_KEY);
+  if (isJwtLike(saved)) return saved;
+  return '';
+}
+
+let authToken = readAuthToken();
+
+function setAuthToken(token) {
+  authToken = isJwtLike(token) ? token : '';
+  if (authToken) localStorage.setItem(AUTH_STORAGE_KEY, authToken);
+  else localStorage.removeItem(AUTH_STORAGE_KEY);
+  updateLoginUI();
+}
+
+function updateLoginUI() {
+  const status = document.getElementById('loginStatus');
+  const panel = document.getElementById('loginPanel');
+  if (!status || !panel) return;
+  if (authToken) {
+    status.textContent = '✓ Token aktif — boleh muat devices';
+    status.style.color = '#16a34a';
+    panel.style.display = 'none';
+  } else {
+    status.textContent = 'Belum login — login di sini atau di /v2/login (token dikongsi)';
+    status.style.color = '#64748b';
+    panel.style.display = 'block';
+  }
+}
+
+async function apiFetch(path, opts = {}) {
+  const headers = { ...(opts.headers || {}) };
+  if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+  if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+  const res = await fetch(API_BASE + path, { ...opts, headers });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  return data;
+}
+
+async function apiLogin(username, password) {
+  const data = await apiFetch('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  });
+  if (!isJwtLike(data.token)) throw new Error('Respons login tiada token JWT sah');
+  setAuthToken(data.token);
+  return data;
+}
+
+document.getElementById('loginBtn').onclick = async () => {
+  const btn = document.getElementById('loginBtn');
+  const user = document.getElementById('loginUser').value.trim();
+  const pass = document.getElementById('loginPass').value;
+  if (!user || !pass) { alert('Isi username dan password'); return; }
+  const orig = btn.textContent;
+  btn.textContent = 'Login...'; btn.disabled = true;
+  try {
+    await apiLogin(user, pass);
+    await loadBoundaries();
+    await loadSavedRoutes();
+    await loadDevices();
+  } catch (err) {
+    alert('Login gagal:\n' + err.message);
+  } finally {
+    btn.textContent = orig; btn.disabled = false;
+  }
+};
+document.getElementById('loginPass').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('loginBtn').click();
+});
+
+let BOUNDARIES = [];
+let selectedBoundaryId = null;
+let savedRoutesMap = {};          // device_id -> [[lat,lng], ...]
+let recordingDeviceId = null;
+let workers = [];
+const boundaryLayers = {};
+
+const map = L.map('map').setView([3.0414218086159095, 101.65173083605691], 17);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '(c) OpenStreetMap'
+}).addTo(map);
+
+const hintEl = document.getElementById('hint');
+const playBtn = document.getElementById('playBtn');
+
+function updatePlayBtn() {
+  if (playing) return;
+  if (selectedBoundaryId) {
+    playBtn.disabled = false;
+    playBtn.style.background = '#7c3aed';
+    playBtn.style.color = '#fff';
+    playBtn.style.cursor = 'pointer';
+    playBtn.textContent = 'Play Simulasi';
+  } else {
+    playBtn.disabled = true;
+    playBtn.style.background = '#cbd5e1';
+    playBtn.style.color = '#94a3b8';
+    playBtn.style.cursor = 'not-allowed';
+    playBtn.textContent = 'Pilih boundary untuk Play';
+  }
+}
+
+async function loadBoundaries() {
+  try {
+    if (!authToken) return;
+    const fc = await apiFetch('/boundaries');
+    BOUNDARIES = (fc.features || []).map(f => ({
+      id: f.properties.id,
+      name: f.properties.name,
+      visible: f.properties.visible !== false,
+      feature: f,
+    }));
+    renderBoundaries();
+    workers.forEach(checkWorker);
+  } catch (err) {
+    console.error('Gagal muat boundary:', err);
+    hintEl.textContent = 'Gagal muat boundary: ' + err.message;
+  }
+}
+
+async function loadSavedRoutes() {
+  if (!authToken) return;
+  try {
+    const data = await apiFetch('/simulator-routes');
+    savedRoutesMap = {};
+    (data.routes || []).forEach(r => {
+      if (Array.isArray(r.route) && r.route.length >= 2) {
+        savedRoutesMap[r.device_id] = r.route;
+      }
+    });
+    renderWorkerList();
+  } catch (err) {
+    // Backend cloud belum deploy route ini — anggap tiada route tersimpan
+    if (err.message === 'Not found') {
+      savedRoutesMap = {};
+      return;
+    }
+    console.warn('Gagal muat routes:', err.message);
+  }
+}
+
+function renderBoundaries() {
+  Object.values(boundaryLayers).forEach(l => map.removeLayer(l));
+  for (const b of BOUNDARIES) {
+    if (!b.visible) continue;
+    const isSelected = b.id === selectedBoundaryId;
+    const layer = L.geoJSON(b.feature, {
+      style: {
+        color: isSelected ? '#7c3aed' : '#3b82f6',
+        weight: isSelected ? 3 : 2,
+        fillOpacity: isSelected ? 0.18 : 0.1,
+      }
+    }).addTo(map).bindTooltip(b.name + (isSelected ? ' (dipilih)' : ''));
+    boundaryLayers[b.id] = layer;
+  }
+  renderBoundaryList();
+  updatePlayBtn();
+}
+
+function flyToBoundary(b) {
+  const layer = boundaryLayers[b.id];
+  let bounds;
+  if (layer) bounds = layer.getBounds();
+  else {
+    const tmp = L.geoJSON(b.feature);
+    bounds = tmp.getBounds();
+    map.removeLayer(tmp);
+  }
+  if (!bounds.isValid()) return;
+  map.setView(bounds.getCenter(), 18);
+}
+
+function selectBoundary(b) {
+  selectedBoundaryId = b.id;
+  renderBoundaries();
+  flyToBoundary(b);
+  hintEl.textContent = 'Boundary "' + b.name + '" dipilih — Play simulasi atau rakam laluan device';
+}
+
+function renderBoundaryList() {
+  const el = document.getElementById('boundaryList');
+  el.innerHTML = '';
+  if (BOUNDARIES.length === 0) {
+    el.innerHTML = '<div style="padding:8px 16px;color:#94a3b8;font-size:12px">Tiada boundary.</div>';
+    return;
+  }
+  BOUNDARIES.forEach(b => {
+    const row = document.createElement('div');
+    const isSel = b.id === selectedBoundaryId;
+    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:6px 16px;gap:8px;background:' + (isSel ? '#f5f3ff' : 'transparent');
+    const nameBtn = document.createElement('button');
+    nameBtn.type = 'button';
+    nameBtn.textContent = (isSel ? '● ' : '') + b.name;
+    nameBtn.title = 'Pilih boundary untuk Play';
+    nameBtn.style.cssText = 'flex:1;text-align:left;font-size:13px;color:' + (isSel ? '#7c3aed' : (b.visible ? '#0f172a' : '#94a3b8')) + ';background:none;border:none;padding:0;cursor:pointer;font-weight:' + (isSel ? '700' : '400');
+    nameBtn.onclick = () => selectBoundary(b);
+    row.appendChild(nameBtn);
+    const visBtn = document.createElement('button');
+    visBtn.textContent = b.visible ? 'Hide' : 'Show';
+    visBtn.style.cssText = 'font-size:11px;padding:2px 10px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#475569;cursor:pointer;flex-shrink:0';
+    visBtn.onclick = (e) => { e.stopPropagation(); b.visible = !b.visible; renderBoundaries(); workers.forEach(checkWorker); };
+    row.appendChild(visBtn);
+    el.appendChild(row);
+  });
+}
+
+function workerIcon(color, label) {
+  return L.divIcon({
+    className: '',
+    html: '<div class="worker-dot" style="width:22px;height:22px;border-radius:50%;background:' + color + ';border:3px solid #fff;box-shadow:0 0 6px rgba(0,0,0,.4);color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">' + label + '</div>',
+    iconSize: [22, 22],
+    iconAnchor: [11, 11]
+  });
+}
+
+function setWorkerColor(w, color) {
+  const el = w.marker.getElement();
+  if (el) { const d = el.querySelector('.worker-dot'); if (d) d.style.background = color; }
+}
+
+function fmtPt(ll) {
+  return [+ll.lat.toFixed(6), +ll.lng.toFixed(6)];
+}
+
+function updateRoutePolyline(w) {
+  if (w.routePolyline) map.removeLayer(w.routePolyline);
+  if (!w.route || w.route.length < 2) { w.routePolyline = null; return; }
+  w.routePolyline = L.polyline(w.route, { color: '#f97316', weight: 3, dashArray: '6 4' }).addTo(map);
+}
+
+function applyMarkerVisibility() {
+  workers.forEach(w => {
+    const show = !recordingDeviceId || w.id === recordingDeviceId;
+    if (show) {
+      if (!map.hasLayer(w.marker)) w.marker.addTo(map);
+    } else {
+      if (map.hasLayer(w.marker)) map.removeLayer(w.marker);
+    }
+  });
+}
+
+function startRecording(w) {
+  if (recordingDeviceId) return;
+  if (playing) stopSimulation();
+  recordingDeviceId = w.id;
+  w.recording = true;
+  w.route = [];
+  w.savedOnce = false;
+  if (w.routePolyline) { map.removeLayer(w.routePolyline); w.routePolyline = null; }
+  applyMarkerVisibility();
+  w.marker.dragging.enable();
+  renderWorkerList();
+  hintEl.textContent = 'Rakam "' + w.name + '" — drag marker, boleh sambung selepas drop';
+}
+
+function stopRecording(discard) {
+  if (!recordingDeviceId) return;
+  const w = workers.find(x => x.id === recordingDeviceId);
+  if (w) {
+    w.recording = false;
+    if (discard) {
+      w.route = [];
+      if (w.routePolyline) { map.removeLayer(w.routePolyline); w.routePolyline = null; }
+    }
+  }
+  recordingDeviceId = null;
+  applyMarkerVisibility();
+  renderWorkerList();
+  hintEl.textContent = selectedBoundaryId
+    ? 'Boundary dipilih — Play simulasi atau rakam laluan device'
+    : 'Pilih boundary, rakam laluan device, kemudian Play simulasi';
+}
+
+async function saveRecording(w) {
+  if (!w.recording || w.savedOnce || w.route.length < 2) return;
+  const btn = document.querySelector('[data-save-id="' + w.id + '"]');
+  if (btn) { btn.textContent = 'Menyimpan...'; btn.disabled = true; }
+  try {
+    await apiFetch('/simulator-routes/' + encodeURIComponent(w.id), {
+      method: 'PUT',
+      body: JSON.stringify({ route: w.route }),
+    });
+    savedRoutesMap[w.id] = w.route.slice();
+    w.savedOnce = true;
+    stopRecording(false);
+    await loadSavedRoutes();
+    hintEl.textContent = 'Laluan "' + w.name + '" disimpan';
+  } catch (err) {
+    alert('Gagal simpan route:\n' + err.message);
+    if (btn) { btn.textContent = 'Save'; btn.disabled = false; }
+  }
+}
+
+function addDevice(dev) {
+  const label = (dev.name || dev.device_id || '?').toString().slice(0, 2).toUpperCase();
+  const name = dev.name || dev.device_id;
+  const marker = L.marker([dev.latitude, dev.longitude], { draggable: true, icon: workerIcon('#94a3b8', label) })
+    .addTo(map).bindTooltip(name);
+  const w = {
+    id: dev.device_id,
+    name,
+    marker,
+    insideId: null,
+    enterTime: null,
+    exitTime: null,
+    route: [],
+    routePolyline: null,
+    recording: false,
+    savedOnce: false,
+    _lastRec: 0,
+    _raf: null,
+  };
+
+  marker.on('dragstart', () => {
+    if (!w.recording) return;
+    const pt = fmtPt(marker.getLatLng());
+    if (w.route.length === 0) {
+      w.route.push(pt);
+    } else {
+      const last = w.route[w.route.length - 1];
+      if (last[0] !== pt[0] || last[1] !== pt[1]) w.route.push(pt);
+    }
+    w._lastRec = Date.now();
+  });
+
+  marker.on('drag', () => {
+    if (!w.recording) return;
+    checkWorker(w);
+    const now = Date.now();
+    if (now - w._lastRec > 100) {
+      w.route.push(fmtPt(marker.getLatLng()));
+      w._lastRec = now;
+      updateRoutePolyline(w);
+    }
+  });
+
+  marker.on('dragend', () => {
+    if (!w.recording) return;
+    checkWorker(w);
+    const pt = fmtPt(marker.getLatLng());
+    const last = w.route[w.route.length - 1];
+    if (!last || last[0] !== pt[0] || last[1] !== pt[1]) w.route.push(pt);
+    updateRoutePolyline(w);
+    renderWorkerList();
+  });
+
+  workers.push(w);
+  checkWorker(w);
+  return w;
+}
+
+function clearDevices() {
+  workers.forEach(w => {
+    if (w.routePolyline) map.removeLayer(w.routePolyline);
+    map.removeLayer(w.marker);
+  });
+  workers = [];
+  recordingDeviceId = null;
+}
+
+async function loadDevices() {
+  const btn = document.getElementById('reloadBtn');
+  const orig = btn.textContent;
+  btn.textContent = 'Memuat...'; btn.disabled = true;
+  try {
+    if (!authToken) throw new Error('Belum login. Guna panel LOGIN API di kiri, atau ?token=<JWT>');
+    const data = await apiFetch('/devices/with-position');
+    const all = data.devices || [];
+    const usable = all.filter(d =>
+      typeof d.latitude === 'number' && typeof d.longitude === 'number' &&
+      Number.isFinite(d.latitude) && Number.isFinite(d.longitude) &&
+      d.latitude >= -90 && d.latitude <= 90 && d.longitude >= -180 && d.longitude <= 180
+    );
+    clearDevices();
+    usable.forEach(addDevice);
+    renderWorkerList();
+    if (usable.length === 0) {
+      hintEl.textContent = 'Tiada device berposisi. Total diterima: ' + all.length;
+    } else {
+      map.fitBounds(workers.map(w => w.marker.getLatLng()), { padding: [60, 60], maxZoom: 17 });
+    }
+  } catch (err) {
+    console.error(err);
+    hintEl.textContent = 'Gagal muat devices: ' + err.message;
+    alert('Gagal muat devices.\n' + err.message);
+    if (err.message.includes('Token')) setAuthToken('');
+  } finally {
+    btn.textContent = orig; btn.disabled = false;
+  }
+}
+document.getElementById('reloadBtn').onclick = async () => {
+  await loadSavedRoutes();
+  await loadDevices();
+};
+
+function checkWorker(w) {
+  const ll = w.marker.getLatLng();
+  const pt = turf.point([ll.lng, ll.lat]);
+  let found = null;
+  for (const b of BOUNDARIES) {
+    if (!b.visible) continue;
+    if (turf.booleanPointInPolygon(pt, b.feature)) { found = b; break; }
+  }
+  if (found && w.insideId === null) {
+    w.insideId = found.id; w.enterTime = new Date(); w.exitTime = null;
+    setWorkerColor(w, '#22c55e');
+  } else if (!found && w.insideId !== null) {
+    w.exitTime = new Date(); w.insideId = null;
+    setWorkerColor(w, recordingDeviceId === w.id ? '#f97316' : '#94a3b8');
+  } else if (!found && recordingDeviceId === w.id) {
+    setWorkerColor(w, '#f97316');
+  }
+  renderWorkerList();
+}
+
+function fmt(d) { return d ? d.toLocaleTimeString('ms-MY', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'; }
+function durationStr(start) { const s = Math.floor((Date.now() - start) / 1000); const m = Math.floor(s / 60); return (m > 0 ? m + 'm ' : '') + (s % 60) + 's'; }
+
+function btnStyle(enabled, color) {
+  return 'font-size:10px;padding:3px 8px;border:none;border-radius:5px;background:' + (enabled ? color : '#e2e8f0') + ';color:' + (enabled ? '#fff' : '#94a3b8') + ';cursor:' + (enabled ? 'pointer' : 'not-allowed') + ';font-weight:600';
+}
+
+function renderWorkerList() {
+  const el = document.getElementById('workerList');
+  const insideCount = workers.filter(w => w.insideId !== null).length;
+  if (workers.length === 0) {
+    el.innerHTML = '<div style="padding:16px;color:#94a3b8;font-size:13px;text-align:center">Tiada device. Tekan "↻ Muat Devices".</div>';
+    return;
+  }
+  el.innerHTML = '<div style="padding:6px 16px;font-size:12px;color:#475569;background:#f8fafc;border-bottom:1px solid #f1f5f9">Dalam kawasan: <b style="color:#16a34a">' + insideCount + '</b> / ' + workers.length + '</div>';
+
+  workers.forEach(w => {
+    const inside = w.insideId !== null;
+    const isRec = w.recording;
+    const color = isRec ? '#f97316' : (inside ? '#22c55e' : '#94a3b8');
+    const siteName = inside ? (BOUNDARIES.find(b => b.id === w.insideId)?.name || '') : '';
+    const savedPts = savedRoutesMap[w.id]?.length || 0;
+    const draftPts = w.route.length;
+
+    let subtitle;
+    if (isRec) subtitle = 'Rakam: ' + draftPts + ' titik';
+    else if (inside) subtitle = 'Masuk: ' + fmt(w.enterTime) + ' | <span class="dur" data-id="' + w.id + '" style="color:#16a34a;font-weight:600">' + durationStr(w.enterTime) + '</span>';
+    else if (w.exitTime) subtitle = 'Keluar: ' + fmt(w.exitTime);
+    else subtitle = 'Belum masuk kawasan';
+
+    const row = document.createElement('div');
+    row.style.cssText = 'padding:10px 16px;border-bottom:1px solid #f1f5f9' + (isRec ? ';background:#fff7ed' : '');
+
+    const top = document.createElement('div');
+    top.style.cssText = 'display:flex;align-items:center;gap:10px;cursor:pointer';
+    top.innerHTML = '<div style="width:12px;height:12px;border-radius:50%;background:' + color + ';flex-shrink:0"></div>' +
+      '<div style="flex:1;min-width:0"><div style="font-weight:600;color:#0f172a;font-size:14px">' + w.name +
+      (inside ? '<span style="font-size:11px;color:#16a34a"> - ' + siteName + '</span>' : '') +
+      '</div><div style="font-size:11px;color:#64748b">' + subtitle +
+      (savedPts ? ' · disimpan: ' + savedPts + ' titik' : '') + '</div></div>';
+    top.onclick = () => map.panTo(w.marker.getLatLng());
+    row.appendChild(top);
+
+    const btns = document.createElement('div');
+    btns.style.cssText = 'display:flex;gap:6px;margin-top:8px;padding-left:22px';
+
+    const canRecord = !recordingDeviceId && !playing;
+    const canStop = isRec && !w.savedOnce;
+    const canSave = isRec && !w.savedOnce && w.route.length >= 2;
+
+    const recBtn = document.createElement('button');
+    recBtn.textContent = isRec ? '● Rekod' : 'Rekod';
+    recBtn.style.cssText = btnStyle(canRecord || isRec, isRec ? '#ea580c' : '#2563eb');
+    recBtn.disabled = !canRecord && !isRec;
+    recBtn.onclick = (e) => { e.stopPropagation(); if (canRecord) startRecording(w); };
+    btns.appendChild(recBtn);
+
+    const stopBtn = document.createElement('button');
+    stopBtn.textContent = 'Stop';
+    stopBtn.style.cssText = btnStyle(canStop, '#64748b');
+    stopBtn.disabled = !canStop;
+    stopBtn.onclick = (e) => { e.stopPropagation(); stopRecording(true); };
+    btns.appendChild(stopBtn);
+
+    const saveBtn = document.createElement('button');
+    saveBtn.textContent = 'Save';
+    saveBtn.setAttribute('data-save-id', w.id);
+    saveBtn.style.cssText = btnStyle(canSave, '#16a34a');
+    saveBtn.disabled = !canSave;
+    saveBtn.onclick = (e) => { e.stopPropagation(); saveRecording(w); };
+    btns.appendChild(saveBtn);
+
+    row.appendChild(btns);
+    el.appendChild(row);
+  });
+}
+
+setInterval(() => {
+  workers.forEach(w => {
+    if (w.insideId !== null) {
+      const s = document.querySelector('.dur[data-id="' + w.id + '"]');
+      if (s) s.textContent = durationStr(w.enterTime);
+    }
+  });
+}, 1000);
+
+let playing = false;
+let playedWorkers = [];
+
+function animateRoute(w, points) {
+  let seg = 0, t = 0;
+  // const stepT = 0.04;
+  const stepT = 0.5;
+  function frame() {
+    if (seg >= points.length - 1) { w._raf = null; return; }
+    const a = points[seg], b = points[seg + 1];
+    const lat = a[0] + (b[0] - a[0]) * t;
+    const lng = a[1] + (b[1] - a[1]) * t;
+    w.marker.setLatLng([lat, lng]);
+    checkWorker(w);
+    t += stepT;
+    if (t >= 1) { t = 0; seg++; }
+    w._raf = requestAnimationFrame(frame);
+  }
+  frame();
+}
+
+function playSimulation() {
+  if (playing) { stopSimulation(); return; }
+  if (!selectedBoundaryId) { alert('Pilih boundary dahulu.'); return; }
+
+  const routesToPlay = workers
+    .filter(w => savedRoutesMap[w.id] && savedRoutesMap[w.id].length >= 2)
+    .map(w => ({ w, points: savedRoutesMap[w.id] }));
+
+  if (routesToPlay.length === 0) {
+    alert('Tiada laluan disimpan.\n\nRekod laluan device (Rekod → drag → Save) dahulu.');
+    return;
+  }
+
+  playing = true;
+  playBtn.textContent = 'Stop Simulasi';
+  playBtn.style.background = '#dc2626';
+  playBtn.disabled = false;
+  playedWorkers = [];
+
+  routesToPlay.forEach(({ w, points }) => {
+    if (!map.hasLayer(w.marker)) w.marker.addTo(map);
+    w.marker.dragging.disable();
+    w.marker.setLatLng(points[0]);
+    checkWorker(w);
+    playedWorkers.push(w);
+    animateRoute(w, points);
+  });
+  renderWorkerList();
+}
+
+function stopSimulation() {
+  playing = false;
+  playedWorkers.forEach(w => {
+    if (w._raf) { cancelAnimationFrame(w._raf); w._raf = null; }
+    w.marker.dragging.enable();
+  });
+  playedWorkers = [];
+  updatePlayBtn();
+  renderWorkerList();
+}
+playBtn.onclick = () => { if (!playBtn.disabled) playSimulation(); };
+
+renderWorkerList();
+updateLoginUI();
+updatePlayBtn();
+if (authToken) {
+  loadBoundaries();
+  loadSavedRoutes();
+  loadDevices();
+} else {
+  hintEl.textContent = 'Login dulu (panel kiri), kemudian muat data';
+}
+</script>
