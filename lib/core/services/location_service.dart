@@ -37,6 +37,26 @@ class LocationService {
   Stream<LocationFix> get stream => _controller.stream;
   LocationFix? get lastFix => _last;
 
+  /// Jarak meter antara dua fix (Haversine via Geolocator).
+  static double distanceMeters(LocationFix a, LocationFix b) {
+    return Geolocator.distanceBetween(
+      a.latitude,
+      a.longitude,
+      b.latitude,
+      b.longitude,
+    );
+  }
+
+  /// Jarak meter antara dua titik lat/lon.
+  static double distanceMetersFromCoords(
+    double lat1,
+    double lon1,
+    double lat2,
+    double lon2,
+  ) {
+    return Geolocator.distanceBetween(lat1, lon1, lat2, lon2);
+  }
+
   LocationSettings _streamSettings() {
     final filter = TrackingPublishConfig.locationDistanceFilterMeters;
     if (!kIsWeb && Platform.isAndroid) {

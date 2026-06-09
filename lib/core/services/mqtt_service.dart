@@ -52,6 +52,7 @@ class MqttService {
   void Function(bool connected)? onConnectionChanged;
   void Function(bool success)? onPublishResult;
   void Function(Map<String, dynamic> ack)? onAck;
+  void Function()? onReconnected; // selepas connect/reconnect + flush queue
   void Function()? onReconnectExhausted; // 5x auto gagal
   void Function(int attempt, int max)? onReconnectAttempt; // info cubaan
 
@@ -176,6 +177,9 @@ class MqttService {
     if (!MqttOfflineQueue().isEmpty) {
       MqttOfflineQueue().flush(_client!, _deviceId!);
     }
+
+    // Push snapshot terkini (GPS / sensor cache) — bukan bergantung polling Transmission.
+    onReconnected?.call();
   }
 
   void _onDisconnected() {

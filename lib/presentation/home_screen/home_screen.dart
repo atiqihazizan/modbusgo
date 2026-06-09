@@ -38,10 +38,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   StreamSubscription<LocationFix>? _locSub;
 
-  /// Satu publish awal selepas MQTT connect (sesi Home ini); selepas itu GPS stream sahaja.
-  bool _initialHomePublishDone = false;
-  bool _initialHomePublishInFlight = false;
-
   @override
   void initState() {
     super.initState();
@@ -53,29 +49,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _bootstrapHome() async {
     await _startLocation();
     await _startMqtt();
-    await _tryInitialHomePublish();
-  }
-
-  /// Publish sekali bila MQTT connected + GPS ada; offline → tunggu connect.
-  Future<void> _tryInitialHomePublish() async {
-    if (_initialHomePublishDone ||
-        _initialHomePublishInFlight ||
-        !mounted) {
-      return;
-    }
-    if (!MqttService().isConnected) return;
-
-    _initialHomePublishInFlight = true;
-    try {
-      final sent = await PublishService().publishCurrentSnapshot(
-        requireConnected: true,
-      );
-      if (!mounted || !sent) return;
-      _initialHomePublishDone = true;
-      setState(() => _lastEmit = 'Just now');
-    } finally {
-      _initialHomePublishInFlight = false;
-    }
   }
 
   @override
@@ -92,6 +65,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       MqttService().resumeReconnect();
+      PublishService().startScheduler();
     }
   }
 
@@ -129,11 +103,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       if (connected) {
         ScaffoldMessenger.of(context).clearSnackBars();
+        setState(() {
+          _isOnline = true;
+          _lastEmit = 'Just now';
+        });
+        return;
       }
-      setState(() => _isOnline = connected);
-      if (connected) {
-        unawaited(_tryInitialHomePublish());
-      }
+      setState(() => _isOnline = false);
     };
     mqtt.onReconnectExhausted = () {
       if (!mounted) return;
@@ -169,8 +145,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _startLocation() async {
     await LocationService().start();
+    PublishService().startScheduler();
 
-    // Listen for incoming fixes → update UI + auto-publish.
+    // UI sahaja — publish GPS via PublishService.onLocationEvent (stream dalaman).
     _locSub = LocationService().stream.listen((fix) {
       if (!mounted) return;
       setState(() {
@@ -178,11 +155,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _isMoving = fix.speed >
             TrackingPublishConfig.motionMovingSpeedThresholdMps;
       });
-      if (!_initialHomePublishDone) {
-        unawaited(_tryInitialHomePublish());
-        return;
-      }
-      PublishService().publishGps(fix);
     });
 
     // Show initial fix if already available.

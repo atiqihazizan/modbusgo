@@ -6,21 +6,26 @@ abstract final class TrackingPublishConfig {
   static const String statusLiveIdle = 'idle';
   static const String statusLiveOffline = 'offline';
 
-  // --- Idle / publish timing (idle watchdog & heartbeat — logik guna nilai ini) ---
-  /// Publish pertama sesi (cth launch snapshot) — elak idle terlalu cepat.
-  static const Duration idleWatchAfterLaunch = Duration(seconds: 30);
-  /// Publish berikutnya dalam sesi yang sama.
-  static const Duration idleWatchAfterPublish = Duration(seconds: 10);
-  static const Duration idleHeartbeatInterval = Duration(seconds: 3);
-  static const Duration gpsChangeMinGap = Duration(seconds: 3);
-  static const Duration exitPublishDebounce = Duration(seconds: 4);
+  // --- Scheduler (ticker pusat GPS + Modbus) ---
+  /// Interval tik scheduler — mudah ubah (default 500ms).
+  static const Duration schedulerTickInterval = Duration(milliseconds: 500);
 
-  // --- Distance sensitivity ---
-  /// Perbezaan min lat/lon (darjah) untuk anggap koordinat "berubah".
-  static const double coordinateChangeEpsilonDegrees = 5e-5;
+  // --- Publish timing ---
+  static const Duration gpsChangeMinGap = Duration(seconds: 1);
+  static const Duration maxPublishInterval = Duration(seconds: 5);
+  static const Duration idleHeartbeatInterval = Duration(seconds: 30);
+  static const Duration idleConfirmDuration = Duration(seconds: 60);
+  static const Duration exitPublishDebounce = Duration(seconds: 1);
+
+  // --- Distance sensitivity (meter) ---
+  /// Jarak min untuk anggap bergerak / layak publish online.
+  static const double minMoveDistanceMeters = 1;
+
+  /// Jarak di bawah ini = koordinat redundant (skip publish online).
+  static const double redundantDistanceMeters = 2;
 
   /// Geolocator: emit fix bila pergerakan ≥ meter ini.
-  static const int locationDistanceFilterMeters = 5;
+  static const int locationDistanceFilterMeters = 1;
 
   /// Tolak fix dengan accuracy lebih buruk daripada ini (meter).
   static const double maxAcceptableAccuracyMeters = 80;

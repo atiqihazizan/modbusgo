@@ -48,7 +48,6 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
   ModbusTransport? _transport; // transport aktif (BLE buat masa ni)
   StreamSubscription<HexResponse>? _rxSub;
   StreamSubscription<bool>? _connSub;
-  Timer? _nextPollTimer;
   Timer? _rxTimeoutTimer;
   bool _awaitingRx = false; // TX dalam flight — tunggu RX/timeout sebelum poll seterusnya
   late ModbusDevice _device; // salinan boleh-ubah (boleh ditukar selepas edit)
@@ -105,7 +104,6 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
 
   @override
   void dispose() {
-    _nextPollTimer?.cancel();
     _rxTimeoutTimer?.cancel();
     _awaitingRx = false;
     _rxSub?.cancel();
@@ -122,7 +120,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
       ),
     );
     _transport?.disconnect();
-    if (isLooping) PublishService().resumeGps();
+    PublishService().detachModbusPoller();
     if (_runtime.isPolling(_device.id)) _runtime.setPolling(null);
     PublishService().setTransmissionScreenActive(false);
     _tabController.dispose();
@@ -224,7 +222,6 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
   void _handleTransportLost() {
     if (!mounted) return;
     if (isLooping) onStopLoop();
-    _nextPollTimer?.cancel();
     _rxTimeoutTimer?.cancel();
     _awaitingRx = false;
     setState(() {
@@ -249,7 +246,6 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
 
   void onDisconnect() {
     if (isLooping) onStopLoop();
-    _nextPollTimer?.cancel();
     _rxTimeoutTimer?.cancel();
     _awaitingRx = false;
     _rxSub?.cancel();
@@ -266,22 +262,27 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
 
   void onStartLoop() {
     if (_transport == null || _sendableCommand.isEmpty) return;
-    _nextPollTimer?.cancel();
     _rxTimeoutTimer?.cancel();
     _awaitingRx = false;
-    PublishService().pauseGps();
+    PublishService().attachModbusPoller(
+      canPoll: () =>
+          isLooping &&
+          _transport != null &&
+          _sendableCommand.isNotEmpty &&
+          !_awaitingRx,
+      pollOnce: _kickPollCycle,
+      pollInterval: _pollInterval,
+    );
     _runtime.setPolling(_device.id);
     setState(() => isLooping = true);
     _kickPollCycle();
   }
 
   void onStopLoop() {
-    _nextPollTimer?.cancel();
-    _nextPollTimer = null;
     _rxTimeoutTimer?.cancel();
     _rxTimeoutTimer = null;
     _awaitingRx = false;
-    PublishService().resumeGps();
+    PublishService().detachModbusPoller();
     if (_runtime.isPolling(_device.id)) _runtime.setPolling(null);
     if (mounted) setState(() => isLooping = false);
   }
@@ -291,14 +292,6 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     if (!isLooping || _transport == null || _sendableCommand.isEmpty) return;
     if (_awaitingRx) return;
     _sendPollRequest();
-  }
-
-  void _scheduleNextPollCycle() {
-    if (!isLooping || !mounted) return;
-    _nextPollTimer?.cancel();
-    _nextPollTimer = Timer(_pollInterval, () {
-      if (mounted && isLooping) _kickPollCycle();
-    });
   }
 
   Future<void> _sendPollRequest() async {
@@ -362,7 +355,6 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     _rxTimeoutTimer?.cancel();
     _awaitingRx = false;
     _applyRxToUi(_normalizeResponse(resp));
-    if (isLooping && mounted) _scheduleNextPollCycle();
   }
 
   void _onRxResponse(HexResponse resp) {
