@@ -20,6 +20,7 @@ import 'device_metrics_service.dart';
 import 'local_storage_service.dart';
 import 'location_service.dart';
 import 'mqtt_service.dart';
+import 'gps_smoother.dart';
 
 /// Nilai [status_live] dalam bundle tracking (selari backend).
 abstract final class PublishStatusLive {
@@ -37,6 +38,7 @@ class PublishService {
 
   final MqttService _mqtt = MqttService();
   final LocationService _location = LocationService();
+  final GpsSmoother _smoother = GpsSmoother(3); // Gunakan 3 titik untuk purata
 
   String? _nodeId;
   String? _deviceName;
@@ -162,8 +164,16 @@ class PublishService {
   }
 
   /// GPS event: simpan fix terkini — publish diurus timer 500ms.
+  // void onLocationEvent(LocationFix fix) {
+  //   _pendingFix = fix;
+  //   _updateMotionState(fix, DateTime.now());
+  // }
   void onLocationEvent(LocationFix fix) {
-    _pendingFix = fix;
+    // Hanya masukkan ke smoother jika akurasi bagus (Contoh < 20m)
+    // if (fix.accuracy != null && fix.accuracy! > 20) return; 
+
+    _smoother.add(fix);
+    _pendingFix = _smoother.getSmoothedFix(); // Guna data yang sudah di-smooth
     _updateMotionState(fix, DateTime.now());
   }
 

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sizer/sizer.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../core/app_export.dart';
 import '../core/services/device_metrics_service.dart';
@@ -52,9 +53,16 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_enableScreenWakelock());
+    });
     MqttService().onReconnected = () {
       unawaited(PublishService().publishReconnectSnapshot());
     };
+  }
+
+  Future<void> _enableScreenWakelock() async {
+    await WakelockPlus.enable();
   }
 
   @override
@@ -71,6 +79,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       );
     }
     if (state == AppLifecycleState.resumed) {
+      unawaited(_enableScreenWakelock());
       MqttService().resumeReconnect();
     }
   }

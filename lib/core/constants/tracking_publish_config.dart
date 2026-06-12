@@ -8,7 +8,8 @@ abstract final class TrackingPublishConfig {
 
   // --- Scheduler (ticker pusat GPS + Modbus) ---
   /// Interval tik scheduler — mudah ubah (default 500ms).
-  static const Duration schedulerTickInterval = Duration(milliseconds: 500);
+  // static const Duration schedulerTickInterval = Duration(milliseconds: 500);
+  static const Duration schedulerTickInterval = Duration(seconds: 1);
 
   // --- Publish timing ---
   static const Duration gpsChangeMinGap = Duration(seconds: 1);
@@ -22,13 +23,15 @@ abstract final class TrackingPublishConfig {
   static const double minMoveDistanceMeters = 1;
 
   /// Jarak di bawah ini = koordinat redundant (skip publish online).
-  static const double redundantDistanceMeters = 2;
+  // static const double redundantDistanceMeters = 2;
+  static const double redundantDistanceMeters = 5;
 
   /// Geolocator: emit fix bila pergerakan ≥ meter ini.
   static const int locationDistanceFilterMeters = 1;
 
   /// Tolak fix dengan accuracy lebih buruk daripada ini (meter).
-  static const double maxAcceptableAccuracyMeters = 80;
+  // static const double maxAcceptableAccuracyMeters = 80;
+  static const double maxAcceptableAccuracyMeters = 15;
 
   // --- motion_status (kelajuan, bukan status_live) ---
   static const double motionMovingSpeedThresholdMps = 0.5;
