@@ -308,6 +308,15 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         actions: [
           IconButton(
+            onPressed: () => context.push(AppRoutes.mapViewScreen),
+            icon: CustomIconWidget(
+              iconName: 'map',
+              color: theme.colorScheme.onSurface,
+              size: 22,
+            ),
+            tooltip: 'Map View',
+          ),
+          IconButton(
             onPressed: () => context.push(AppRoutes.profileScreen),
             icon: CustomIconWidget(
               iconName: 'account_circle',
@@ -346,7 +355,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 12),
                   const ModbusDevicePanelWidget(),
-                  const SizedBox(height: 12),
                 ],
               ),
             ),
