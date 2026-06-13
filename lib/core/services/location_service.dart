@@ -195,11 +195,12 @@ class LocationService {
   }
 
   /// Mula aliran lokasi berterusan (untuk home/tracking). Non-blocking.
-  Future<void> start() async {
+  /// Return true jika stream berjaya dimulakan.
+  Future<bool> start() async {
     final err = await ensureReady();
     if (err != null) {
       if (kDebugMode) debugPrint('📍 [Location] start cancelled: $err');
-      return;
+      return false;
     }
     _sub?.cancel();
     _sub = Geolocator.getPositionStream(locationSettings: _streamSettings())
@@ -221,6 +222,7 @@ class LocationService {
         if (kDebugMode) debugPrint('📍 [Location] stream error: $e');
       },
     );
+    return true;
   }
 
   void stop() {

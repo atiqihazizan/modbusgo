@@ -10,8 +10,8 @@ import '../../core/services/ble_connection_service.dart';
 import '../../core/services/local_storage_service.dart';
 import '../../core/services/modbus_runtime_service.dart';
 import '../../core/services/modbus_storage_service.dart';
-import '../../core/services/location_service.dart';
 import '../../core/services/publish_service.dart';
+import '../../core/services/sensor_state_service.dart';
 import '../../core/services/wifi_connection_cache.dart';
 import '../../core/constants/modbus_data_format.dart';
 import '../../core/transport/modbus_frame.dart';
@@ -71,7 +71,6 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     _tabController = TabController(length: 2, vsync: this);
     _loadGlobalRxTimeout(); // isi _responseTimeout dari tetapan global
     PublishService().setTransmissionScreenActive(true);
-    LocationService().start(); // pastikan lastFix sentiasa segar untuk publishModbus
     _rebuildCommand(); // jana commandText + _sendableCommand + registerValues
     _loadPersistedRuntime();
     // Auto-connect bila masuk skrin (BLE sahaja buat masa ni).
@@ -129,15 +128,10 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
 
   /// Nilai sensor semasa untuk publish keluar skrin Transmission.
   List<dynamic> _sensorPayloadForExit() {
-    if (registerValues.isNotEmpty &&
-        registerValues.any((v) => v != 0)) {
+    if (registerValues.isNotEmpty) {
       return registerValues.map((v) => v).toList();
     }
-    final cached = PublishService().lastModbusSensorPayload;
-    if (cached != null && cached.isNotEmpty) {
-      return cached;
-    }
-    return const [-1];
+    return SensorStateService().payload;
   }
 
   /// Jana semula arahan + senarai register dari _device semasa.
@@ -406,7 +400,7 @@ class _ModbusTransmissionScreenState extends State<ModbusTransmissionScreen>
     } else if (resp.isError) {
       sensorPayload = const ['ERR'];
     } else {
-      sensorPayload = decoded.isNotEmpty ? decoded : [-1];
+      sensorPayload = decoded;
     }
     PublishService().publishModbus(
       sensorData: sensorPayload,

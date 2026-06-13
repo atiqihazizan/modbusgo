@@ -70,7 +70,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final agencyCode = await storage.getAgencyCode();
     final agencyToken = await storage.getAgencyToken();
     final deviceId = await DeviceIdentityService().getDeviceId();
-    final agencies = await RegistrationService().listAgencies();
     final modbusTimeoutMs = await storage.getModbusRxTimeoutMs(defaultMs: 1000);
 
     if (mounted) {
@@ -82,10 +81,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _agencyCode = agencyCode ?? '-';
         _agencyToken = agencyToken ?? '';
         _isOnline = MqttService().isConnected;
-        _agencies = agencies;
         _isLoading = false;
       });
     }
+
+    unawaited(_loadAgencies());
+  }
+
+  /// Muat senarai agency dari server (optional — perlukan network).
+  Future<void> _loadAgencies() async {
+    final agencies = await RegistrationService().listAgencies();
+    if (!mounted) return;
+    setState(() => _agencies = agencies);
   }
 
   Future<void> _saveModbusTimeout() async {
@@ -113,21 +120,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (!mounted) return;
 
     if (ok) {
-      final storage = LocalStorageService();
-      final agencyName = await storage.getAgencyName();
-      final agencyCode = await storage.getAgencyCode();
-      final agencyToken = await storage.getAgencyToken();
+      await _loadInfo();
       if (!mounted) return;
-      setState(() {
-        _agencyName = (agencyName != null && agencyName.isNotEmpty)
-            ? agencyName
-            : '-';
-        _agencyCode = (agencyCode != null && agencyCode.isNotEmpty)
-            ? agencyCode
-            : '-';
-        _agencyToken = agencyToken ?? '';
-        _isReloadingAgency = false;
-      });
+      setState(() => _isReloadingAgency = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('Agency data updated'),

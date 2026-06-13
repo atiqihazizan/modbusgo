@@ -20,7 +20,7 @@ import './mqtt_topics.dart';
 //   - Habis 5x → onReconnectExhausted (UI toast minta manual reconnect).
 //   - manualReconnect() → reset counter, cuba 5x lagi.
 //   - resumeReconnect() → dipanggil bila app kembali foreground (jika exhausted).
-//   - Offline queue → flush ke /backfill bila reconnect (data tak hilang).
+//   - Offline queue → backfill batch (/backfill) + bundle (/bundle) berstruktur.
 //   - LWT (Last Will): {online:false} bila putus mendadak.
 
 class MqttService {
@@ -241,16 +241,41 @@ class MqttService {
       return;
     }
     if (!isConnected) {
-      MqttOfflineQueue().enqueue(payload);
+      MqttOfflineQueue().enqueueBundle(payload);
       onPublishResult?.call(false);
       if (kDebugMode) {
         debugPrint(
-          '📦 [MQTT] Offline — queued (len: ${MqttOfflineQueue().length})',
+          '📦 [MQTT] Offline — bundle queued (pending: ${MqttOfflineQueue().length})',
         );
       }
       return;
     }
     _rawPublish(MqttTopics(_deviceId!).bundle, jsonEncode(payload));
+  }
+
+  /// Hantar batch ke /backfill (online) atau queue batch (offline) — struktur sama.
+  void publishBackfillBatch(List<Map<String, dynamic>> items) {
+    if (items.isEmpty || _deviceId == null) return;
+    if (_paused) return;
+
+    final payloads = items.map(_buildPayload).toList();
+
+    if (!isConnected) {
+      MqttOfflineQueue().enqueueBackfillBatch(payloads);
+      if (kDebugMode) {
+        debugPrint(
+          '📦 [MQTT] Offline — backfill batch queued '
+          '(${payloads.length} items, pending: ${MqttOfflineQueue().length})',
+        );
+      }
+      return;
+    }
+
+    final topic = MqttTopics(_deviceId!).backfill;
+    _rawPublish(topic, jsonEncode(payloads));
+    if (kDebugMode) {
+      debugPrint('📤 [MQTT] Backfill batch sent (${payloads.length} items)');
+    }
   }
 
   /// Bina payload padan backend normalizeTrackingData.

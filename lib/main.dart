@@ -9,6 +9,7 @@ import '../core/app_export.dart';
 import '../core/services/device_metrics_service.dart';
 import '../core/services/mqtt_service.dart';
 import '../core/services/publish_service.dart';
+import '../core/services/tracking_bootstrap_service.dart';
 import '../widgets/custom_error_widget.dart';
 
 void main() async {
@@ -80,7 +81,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     }
     if (state == AppLifecycleState.resumed) {
       unawaited(_enableScreenWakelock());
-      MqttService().resumeReconnect();
+      TrackingBootstrapService().onAppResumed();
     }
   }
 

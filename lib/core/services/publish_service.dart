@@ -21,6 +21,20 @@ import 'local_storage_service.dart';
 import 'location_service.dart';
 import 'mqtt_service.dart';
 import 'gps_smoother.dart';
+import 'sensor_state_service.dart';
+
+/// Rekod GPS + snapshot sensor pada masa event (untuk bundle/backfill).
+class _GpsTickRecord {
+  const _GpsTickRecord({
+    required this.fix,
+    required this.sensorData,
+    required this.transmissionType,
+  });
+
+  final LocationFix fix;
+  final List<dynamic> sensorData;
+  final String transmissionType;
+}
 
 /// Nilai [status_live] dalam bundle tracking (selari backend).
 abstract final class PublishStatusLive {
@@ -38,6 +52,7 @@ class PublishService {
 
   final MqttService _mqtt = MqttService();
   final LocationService _location = LocationService();
+  final SensorStateService _sensorState = SensorStateService();
   final GpsSmoother _smoother = GpsSmoother(3); // Gunakan 3 titik untuk purata
 
   String? _nodeId;
@@ -66,14 +81,9 @@ class PublishService {
   bool _modbusTransmissionActive = false;
   bool get isModbusTransmissionActive => _modbusTransmissionActive;
 
-  /// Salinan payload sensor Modbus terakhir (untuk publish keluar skrin).
+  /// Salinan payload sensor terakhir (delegasi SensorStateService).
   List<dynamic>? get lastModbusSensorPayload =>
-      _lastModbusSensorPayload == null
-          ? null
-          : List<dynamic>.from(_lastModbusSensorPayload!);
-
-  List<dynamic>? _lastModbusSensorPayload;
-  String _lastModbusTransmissionType = 'Unknown';
+      _sensorState.hasData ? _sensorState.payload : null;
 
   /// Fix lokasi terakhir yang berjaya dipakai untuk publish Modbus (fallback bila GPS stuck).
   LocationFix? _lastReliableModbusFix;
@@ -84,6 +94,9 @@ class PublishService {
   Timer? _schedulerTimer;
   StreamSubscription<LocationFix>? _locSub;
   bool _ticking = false;
+
+  /// Buffer GPS event + sensor snapshot semasa event (≥1/s untuk backfill).
+  final List<_GpsTickRecord> _gpsEventBuffer = [];
 
   LocationFix? _pendingFix;
   LocationFix? _lastPublishedFix;
@@ -169,44 +182,64 @@ class PublishService {
   //   _updateMotionState(fix, DateTime.now());
   // }
   void onLocationEvent(LocationFix fix) {
-    // Hanya masukkan ke smoother jika akurasi bagus (Contoh < 20m)
-    // if (fix.accuracy != null && fix.accuracy! > 20) return; 
-
     _smoother.add(fix);
-    _pendingFix = _smoother.getSmoothedFix(); // Guna data yang sudah di-smooth
-    _updateMotionState(fix, DateTime.now());
-  }
+    final smoothed = _smoother.getSmoothedFix() ?? fix;
+    _pendingFix = smoothed;
+    _updateMotionState(smoothed, DateTime.now());
 
-  /// Publish setiap tik scheduler (R&D: ~2x/s) guna [_pendingFix] dari event.
-  void _tickPublishTask() {
-    final fix = _pendingFix;
-    if (fix == null) return;
-    _publishOnline(fix, DateTime.now());
-  }
-
-  // --- Logik publish berjadual (throttle/jarak/redundant) — disimpan untuk fasa prod.
-  // void _tryPublishOnline() { ... }
-  // void _flushTask() { ... }
-
-  void _publishOnline(LocationFix fix, DateTime now) {
-    if (kDebugMode && _lastPublishAt.millisecondsSinceEpoch > 0) {
-      debugPrint(
-        '⏱️ [Publish] tick gap ${now.difference(_lastPublishAt).inMilliseconds}ms',
-      );
-    }
-    unawaited(_ensureMeta());
-    _publish(
-      latitude: fix.latitude,
-      longitude: fix.longitude,
-      speed: fix.speed,
-      heading: fix.heading,
-      sensorData: const [-1],
-      transmissionType: 'GPS',
-      statusLive: PublishStatusLive.online,
+    final snap = _sensorState.snapshot();
+    _gpsEventBuffer.add(
+      _GpsTickRecord(
+        fix: smoothed,
+        sensorData: snap.sensorData,
+        transmissionType: snap.transmissionType,
+      ),
     );
-    _lastPublishedFix = fix;
-    _lastPublishAt = now;
-    _lastIdleHeartbeatAt = now;
+  }
+
+  /// Publish setiap tik: latest → /bundle, selebihnya → /backfill.
+  void _tickPublishTask() {
+    List<_GpsTickRecord> records;
+    if (_gpsEventBuffer.isNotEmpty) {
+      records = List<_GpsTickRecord>.from(_gpsEventBuffer);
+      _gpsEventBuffer.clear();
+    } else if (_pendingFix != null) {
+      final snap = _sensorState.snapshot();
+      records = [
+        _GpsTickRecord(
+          fix: _pendingFix!,
+          sensorData: snap.sensorData,
+          transmissionType: snap.transmissionType,
+        ),
+      ];
+    } else {
+      return;
+    }
+
+    unawaited(_ensureMeta());
+
+    final latest = records.last;
+    if (records.length > 1) {
+      final backfillMaps = records
+          .sublist(0, records.length - 1)
+          .map(_payloadMapFromRecord)
+          .whereType<Map<String, dynamic>>()
+          .toList();
+      if (backfillMaps.isNotEmpty) {
+        _mqtt.publishBackfillBatch(backfillMaps);
+        if (kDebugMode) {
+          debugPrint(
+            '📤 [Publish] backfill ${backfillMaps.length} GPS events '
+            '(sensor attached)',
+          );
+        }
+      }
+    }
+
+    _publishFromRecord(latest);
+    _lastPublishedFix = latest.fix;
+    _lastPublishAt = DateTime.now();
+    _lastIdleHeartbeatAt = _lastPublishAt;
   }
 
   void _modbusTask() {
@@ -278,12 +311,10 @@ class PublishService {
     await _ensureMeta();
     await DeviceMetricsService().refreshBattery();
 
-    if (_modbusTransmissionActive &&
-        _lastModbusSensorPayload != null &&
-        _lastModbusSensorPayload!.isNotEmpty) {
+    if (_modbusTransmissionActive && _sensorState.hasData) {
       return publishModbus(
-        sensorData: List<dynamic>.from(_lastModbusSensorPayload!),
-        transmissionType: _lastModbusTransmissionType,
+        sensorData: _sensorState.payload,
+        transmissionType: _sensorState.transmissionType,
       );
     }
 
@@ -304,13 +335,14 @@ class PublishService {
       return false;
     }
 
+    final snap = _sensorState.snapshot();
     _publish(
       latitude: f.latitude,
       longitude: f.longitude,
       speed: f.speed,
       heading: f.heading,
-      sensorData: const [-1],
-      transmissionType: 'GPS',
+      sensorData: snap.sensorData,
+      transmissionType: snap.transmissionType,
     );
     _lastPublishedFix = f;
     _lastPublishAt = DateTime.now();
@@ -347,12 +379,14 @@ class PublishService {
       return false;
     }
 
+    final snap = _sensorState.snapshot();
     _publish(
       latitude: f.latitude,
       longitude: f.longitude,
       speed: f.speed,
       heading: f.heading,
-      sensorData: const [-1],
+      sensorData: snap.sensorData,
+      transmissionType: snap.transmissionType,
     );
     _lastPublishedFix = f;
     _lastPublishAt = DateTime.now();
@@ -379,8 +413,10 @@ class PublishService {
     }
 
     _lastReliableModbusFix = fix;
-    _lastModbusSensorPayload = List<dynamic>.from(sensorData);
-    _lastModbusTransmissionType = transmissionType;
+    _sensorState.update(
+      sensorData: sensorData,
+      transmissionType: transmissionType,
+    );
 
     _publish(
       latitude: fix.latitude,
@@ -456,15 +492,11 @@ class PublishService {
     String txType;
     if (sensorData != null) {
       sensors = sensorData;
-      txType = transmissionType ?? _lastModbusTransmissionType;
-    } else if (_modbusTransmissionActive &&
-        _lastModbusSensorPayload != null &&
-        _lastModbusSensorPayload!.isNotEmpty) {
-      sensors = List<dynamic>.from(_lastModbusSensorPayload!);
-      txType = transmissionType ?? _lastModbusTransmissionType;
+      txType = transmissionType ?? _sensorState.transmissionType;
     } else {
-      sensors = const [-1];
-      txType = transmissionType ?? 'GPS';
+      final snap = _sensorState.snapshot();
+      sensors = snap.sensorData;
+      txType = transmissionType ?? snap.transmissionType;
     }
 
     _lastExitPublish = now;
@@ -491,8 +523,73 @@ class PublishService {
   }
 
   // ---------------------------------------------------------------
-  // CORE — satu-satunya tempat bina payload + panggil mqtt
+  // CORE — bina payload + publish bundle / backfill
   // ---------------------------------------------------------------
+
+  void _publishFromRecord(
+    _GpsTickRecord record, {
+    String statusLive = PublishStatusLive.online,
+  }) {
+    _publish(
+      latitude: record.fix.latitude,
+      longitude: record.fix.longitude,
+      speed: record.fix.speed,
+      heading: record.fix.heading,
+      sensorData: record.sensorData,
+      transmissionType: record.transmissionType,
+      statusLive: statusLive,
+    );
+  }
+
+  Map<String, dynamic>? _payloadMapFromRecord(
+    _GpsTickRecord record, {
+    String statusLive = PublishStatusLive.online,
+  }) {
+    return _buildPayloadMap(
+      latitude: record.fix.latitude,
+      longitude: record.fix.longitude,
+      speed: record.fix.speed,
+      heading: record.fix.heading,
+      sensorData: record.sensorData,
+      transmissionType: record.transmissionType,
+      statusLive: statusLive,
+    );
+  }
+
+  Map<String, dynamic>? _buildPayloadMap({
+    required double? latitude,
+    required double? longitude,
+    required double speed,
+    required double? heading,
+    required List<dynamic> sensorData,
+    String transmissionType = 'Unknown',
+    String statusLive = PublishStatusLive.online,
+  }) {
+    if (latitude == null || longitude == null) return null;
+
+    final movingThreshold =
+        TrackingPublishConfig.motionMovingSpeedThresholdMps;
+    final sendDt = DateTime.now().toString().substring(0, 19);
+
+    return <String, dynamic>{
+      'data_type': 'MG',
+      'node_id': _nodeId ?? 'unknown',
+      'send_dt': sendDt,
+      'status_live': statusLive,
+      'motion_status': speed > movingThreshold ? 'moving' : 'idle',
+      'speed': speed,
+      'speed_unit': MetricUnits.metersPerSecond,
+      if (heading != null) 'heading': heading,
+      if (heading != null) 'heading_unit': MetricUnits.degrees,
+      'latitude': latitude,
+      'longitude': longitude,
+      ...DeviceMetricsService().buildPayloadFields(),
+      'transmission_type': transmissionType,
+      'sensor_data': sensorData,
+      'name': _deviceName ?? _nodeId ?? 'unknown',
+      if (_sessionToken != null) 'session_token': _sessionToken,
+    };
+  }
 
   void _publish({
     required double? latitude,
@@ -505,43 +602,28 @@ class PublishService {
   }) {
     unawaited(DeviceMetricsService().refreshBattery());
 
-    if (latitude == null || longitude == null) {
+    final payload = _buildPayloadMap(
+      latitude: latitude,
+      longitude: longitude,
+      speed: speed,
+      heading: heading,
+      sensorData: sensorData,
+      transmissionType: transmissionType,
+      statusLive: statusLive,
+    );
+    if (payload == null) {
       if (kDebugMode) {
         debugPrint('⚠️ [Publish] skip — missing latitude/longitude');
       }
       return;
     }
-    final lat = latitude;
-    final lon = longitude;
-    final movingThreshold =
-        TrackingPublishConfig.motionMovingSpeedThresholdMps;
-    final sendDt = DateTime.now().toString().substring(0, 19);
-
-    final payload = <String, dynamic>{
-      'data_type': 'MG',
-      'node_id': _nodeId ?? 'unknown',
-      'send_dt': sendDt,
-      'status_live': statusLive,
-      'motion_status': speed > movingThreshold ? 'moving' : 'idle',
-      'speed': speed,
-      'speed_unit': MetricUnits.metersPerSecond,
-      if (heading != null) 'heading': heading,
-      if (heading != null) 'heading_unit': MetricUnits.degrees,
-      'latitude': lat,
-      'longitude': lon,
-      ...DeviceMetricsService().buildPayloadFields(),
-      'transmission_type': transmissionType,
-      'sensor_data': sensorData,
-      'name': _deviceName ?? _nodeId ?? 'unknown',
-      if (_sessionToken != null) 'session_token': _sessionToken,
-    };
 
     _mqtt.publishBundle(payload);
 
     if (kDebugMode) {
       debugPrint('📤 [Publish] bundle sent — status_live=$statusLive '
-          'sensor=$sensorData lat=${lat.toStringAsFixed(4)} '
-          'lon=${lon.toStringAsFixed(4)} tx=$transmissionType '
+          'sensor=$sensorData lat=${payload['latitude']} '
+          'lon=${payload['longitude']} tx=$transmissionType '
           'connected=${_mqtt.isConnected}');
     }
   }

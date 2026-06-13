@@ -4,12 +4,11 @@ import 'package:flutter/material.dart';
 
 import '../../core/app_export.dart';
 import '../../core/constants/tracking_publish_config.dart';
-import '../../core/services/device_identity_service.dart';
 import '../../core/services/local_storage_service.dart';
 import '../../core/services/location_service.dart';
 import '../../core/services/mqtt_service.dart';
 import '../../core/services/publish_service.dart';
-import '../../core/services/registration_service.dart';
+import '../../core/services/tracking_bootstrap_service.dart';
 import './widgets/modbus_device_panel_widget.dart';
 import './widgets/unified_dashboard_card_widget.dart';
 
@@ -20,7 +19,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+class _HomeScreenState extends State<HomeScreen> {
   // Data sebenar dari storage
   String _deviceName = '-';
   String _deviceId = '—';
@@ -38,22 +37,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   StreamSubscription<LocationFix>? _locSub;
 
+  static const Duration _launchGpsTimeout = Duration(seconds: 8);
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
+    unawaited(_bootstrapTrackingOnLaunch());
     _loadDeviceInfo();
-    unawaited(_bootstrapHome());
+    _attachMqttUiCallbacks();
+    _subscribeLocationUi();
   }
 
-  Future<void> _bootstrapHome() async {
-    await _startLocation();
-    await _startMqtt();
+  /// Fix GPS pantas untuk paparan UI, kemudian stream + MQTT di background.
+  Future<void> _bootstrapTrackingOnLaunch() async {
+    final fix = await LocationService().getCurrentFix(
+      timeout: _launchGpsTimeout,
+    );
+    if (fix != null && mounted) {
+      setState(() {
+        _coordinates = _fmtCoords(fix.latitude, fix.longitude);
+        _isMoving = fix.speed >
+            TrackingPublishConfig.motionMovingSpeedThresholdMps;
+      });
+    }
+    unawaited(TrackingBootstrapService().startIfRegistered());
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _locSub?.cancel();
     final mqtt = MqttService();
     mqtt.onConnectionChanged = null;
@@ -61,42 +72,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      MqttService().resumeReconnect();
-      PublishService().startScheduler();
-    }
-  }
-
-  Future<void> _loadDeviceInfo() async {
-    final storage = LocalStorageService();
-
-    // Sync terkini dari backend dulu — pastikan agency_code/name tak hilang.
-    // Senyap; kalau gagal (offline), guna nilai storage sedia ada.
-    try {
-      await RegistrationService().restoreFromBackend();
-    } catch (_) {}
-
-    final info = await storage.getDeviceInfo();
-    final agencyName = await storage.getAgencyName();
-    final agencyCode = await storage.getAgencyCode();
-    if (!mounted) return;
-    setState(() {
-      _deviceName = (info?['name']?.isNotEmpty == true) ? info!['name']! : '—';
-      _deviceId = (info?['device_id']?.isNotEmpty == true)
-          ? info!['device_id']!
-          : '—';
-      _agencyName = (agencyName != null && agencyName.isNotEmpty)
-          ? agencyName
-          : '—';
-      _agencyCode = (agencyCode != null && agencyCode.isNotEmpty)
-          ? agencyCode
-          : '—';
-    });
-  }
-
-  Future<void> _startMqtt() async {
+  void _attachMqttUiCallbacks() {
     final mqtt = MqttService();
 
     mqtt.onConnectionChanged = (connected) {
@@ -136,18 +112,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
     };
 
-    final deviceId = await DeviceIdentityService().getDeviceId();
-    if (deviceId.isEmpty) return;
-    await mqtt.init(deviceId: deviceId);
-
-    if (mounted) setState(() => _isOnline = mqtt.isConnected);
+    if (mqtt.isConnected && mounted) {
+      setState(() {
+        _isOnline = true;
+        _lastEmit = 'Just now';
+      });
+    }
   }
 
-  Future<void> _startLocation() async {
-    await LocationService().start();
-    PublishService().startScheduler();
-
-    // UI sahaja — publish GPS via PublishService.onLocationEvent (stream dalaman).
+  void _subscribeLocationUi() {
     _locSub = LocationService().stream.listen((fix) {
       if (!mounted) return;
       setState(() {
@@ -157,11 +130,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       });
     });
 
-    // Show initial fix if already available.
     final f = LocationService().lastFix;
     if (f != null && mounted) {
       setState(() => _coordinates = _fmtCoords(f.latitude, f.longitude));
     }
+  }
+
+  Future<void> _loadDeviceInfo() async {
+    final storage = LocalStorageService();
+
+    final info = await storage.getDeviceInfo();
+    final agencyName = await storage.getAgencyName();
+    final agencyCode = await storage.getAgencyCode();
+    if (!mounted) return;
+    setState(() {
+      _deviceName = (info?['name']?.isNotEmpty == true) ? info!['name']! : '—';
+      _deviceId = (info?['device_id']?.isNotEmpty == true)
+          ? info!['device_id']!
+          : '—';
+      _agencyName = (agencyName != null && agencyName.isNotEmpty)
+          ? agencyName
+          : '—';
+      _agencyCode = (agencyCode != null && agencyCode.isNotEmpty)
+          ? agencyCode
+          : '—';
+    });
   }
 
   String _fmtCoords(double lat, double lon) {
@@ -200,22 +193,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _onManualEmit() async {
     setState(() => _isEmitting = true);
 
+    await TrackingBootstrapService().startIfRegistered();
     final mqtt = MqttService();
 
     if (!mqtt.isConnected) {
-      final deviceId = await DeviceIdentityService().getDeviceId();
-      if (deviceId.isEmpty) {
-        if (mounted) {
-          setState(() => _isEmitting = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Device ID missing — provision first'),
-            ),
-          );
-        }
-        return;
-      }
-      await mqtt.init(deviceId: deviceId);
       await Future.delayed(const Duration(seconds: 2));
     }
 
@@ -321,7 +302,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _agencyName.toUpperCase(),
           style: theme.textTheme.titleLarge?.copyWith(
             fontWeight: FontWeight.w800,
-            // fontSize: 16,
             letterSpacing: 0.3,
             color: theme.colorScheme.onSurface,
           ),

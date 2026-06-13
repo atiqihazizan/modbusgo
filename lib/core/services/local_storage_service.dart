@@ -2,6 +2,9 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// Singleton — simpanan tempatan sesi user/peranti (SharedPreferences).
+/// Selepas registration, semua data disimpan di sini.
+/// Launch app: baca storage sahaja; sync server manual dari Profile/Settings.
 class LocalStorageService {
   static final LocalStorageService _instance = LocalStorageService._internal();
   factory LocalStorageService() => _instance;
@@ -41,6 +44,11 @@ class LocalStorageService {
   Future<bool> hasAgencyToken() async {
     final token = await getAgencyToken();
     return token != null && token.isNotEmpty;
+  }
+
+  /// Peranti sudah didaftarkan locally — cukup untuk launch tanpa network.
+  Future<bool> isRegisteredLocally() async {
+    return await hasDeviceInfo() && await hasAgencyToken();
   }
 
   Future<void> saveAgencyId(int id) async {

@@ -19,10 +19,7 @@ class _BootScreenState extends State<BootScreen> {
   late final DateTime _bootStartedAt;
 
   bool _isLoading = true;
-  bool _offlineBlocked = false;
   String _statusMessage = 'Starting…';
-  String _offlineDetail =
-      'Internet connection is required to set up or restore this device.';
 
   @override
   void initState() {
@@ -45,9 +42,10 @@ class _BootScreenState extends State<BootScreen> {
     context.go(route);
   }
 
-  Future<void> _navigateRegistered(LocalStorageService storage) async {
+  Future<void> _goToRegisteredHome(LocalStorageService storage) async {
     final needApproval = await storage.getNeedApproval();
     if (!mounted) return;
+    // Tracking dimulakan di HomeScreen — jangan tunggu GPS/MQTT di sini.
     await _navigateAfterBoot(
       needApproval ? AppRoutes.pendingScreen : AppRoutes.homeScreen,
     );
@@ -56,7 +54,6 @@ class _BootScreenState extends State<BootScreen> {
   Future<void> _runBootSequence() async {
     setState(() {
       _isLoading = true;
-      _offlineBlocked = false;
       _statusMessage = 'Starting…';
     });
 
@@ -64,56 +61,44 @@ class _BootScreenState extends State<BootScreen> {
       await DeviceIdentityService().getDeviceId();
 
       if (!mounted) return;
-      setState(() => _statusMessage = 'Checking device registration…');
+      setState(() => _statusMessage = 'Loading saved data…');
 
       final storage = LocalStorageService();
-      final hasDevice = await storage.hasDeviceInfo();
-      final hasToken = await storage.hasAgencyToken();
 
-      if (hasDevice && hasToken) {
-        await _navigateRegistered(storage);
+      // Local-first: data wujud dalam storage → terus ke app (offline OK).
+      if (await storage.isRegisteredLocally()) {
+        await _goToRegisteredHome(storage);
         return;
       }
 
-      setState(() => _statusMessage = 'Restoring device data…');
+      // Tiada data local — cuba restore dari server (contoh: reinstall app).
+      if (!await RegistrationService().hasInternetConnection()) {
+        if (!mounted) return;
+        setState(() => _statusMessage = 'Opening setup…');
+        await _navigateAfterBoot(AppRoutes.provisionScreen);
+        return;
+      }
+
+      setState(() => _statusMessage = 'Restoring from server…');
       final restore = await RegistrationService().bootRestoreFromBackend();
 
       if (!mounted) return;
 
       switch (restore) {
         case BootRestoreResult.success:
-          await _navigateRegistered(storage);
+          await _goToRegisteredHome(storage);
         case BootRestoreResult.notRegistered:
           await _navigateAfterBoot(AppRoutes.provisionScreen);
         case BootRestoreResult.offline:
         case BootRestoreResult.networkError:
-          setState(() {
-            _isLoading = false;
-            _offlineBlocked = true;
-            _statusMessage = 'No internet connection';
-            _offlineDetail = restore == BootRestoreResult.offline
-                ? 'Connect to Wi‑Fi or mobile data, then tap Retry.'
-                : 'Could not reach the server. Check your connection and tap Retry.';
-          });
+          setState(() => _statusMessage = 'Opening setup…');
+          await _navigateAfterBoot(AppRoutes.provisionScreen);
       }
     } catch (_) {
       if (!mounted) return;
-      final online = await RegistrationService().hasInternetConnection();
-      if (!online) {
-        setState(() {
-          _isLoading = false;
-          _offlineBlocked = true;
-          _statusMessage = 'No internet connection';
-          _offlineDetail =
-              'Connect to Wi‑Fi or mobile data, then tap Retry.';
-        });
-        return;
-      }
       final storage = LocalStorageService();
-      final hasDevice = await storage.hasDeviceInfo();
-      final hasToken = await storage.hasAgencyToken();
-      if (hasDevice && hasToken) {
-        await _navigateRegistered(storage);
+      if (await storage.isRegisteredLocally()) {
+        await _goToRegisteredHome(storage);
       } else {
         await _navigateAfterBoot(AppRoutes.provisionScreen);
       }
@@ -156,17 +141,10 @@ class _BootScreenState extends State<BootScreen> {
                       const Spacer(flex: 2),
                       SplashLogoWidget(isLoading: _isLoading),
                       const SizedBox(height: 32),
-                      if (_offlineBlocked)
-                        _OfflineBlockedWidget(
-                          title: _statusMessage,
-                          detail: _offlineDetail,
-                          onRetry: _runBootSequence,
-                        )
-                      else
-                        _StatusMessageWidget(
-                          message: _statusMessage,
-                          isLoading: _isLoading,
-                        ),
+                      _StatusMessageWidget(
+                        message: _statusMessage,
+                        isLoading: _isLoading,
+                      ),
                       const Spacer(flex: 3),
                       Text(
                         'ModbusGo v1.0.0',
@@ -183,55 +161,6 @@ class _BootScreenState extends State<BootScreen> {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _OfflineBlockedWidget extends StatelessWidget {
-  final String title;
-  final String detail;
-  final VoidCallback onRetry;
-
-  const _OfflineBlockedWidget({
-    required this.title,
-    required this.detail,
-    required this.onRetry,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      children: [
-        Icon(
-          Icons.wifi_off_rounded,
-          size: 48,
-          color: theme.colorScheme.error.withValues(alpha: 0.85),
-        ),
-        const SizedBox(height: 16),
-        Text(
-          title,
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w700,
-            color: theme.colorScheme.onSurface,
-          ),
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: 10),
-        Text(
-          detail,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: 24),
-        FilledButton.icon(
-          onPressed: onRetry,
-          icon: const Icon(Icons.refresh, size: 20),
-          label: const Text('Retry'),
-        ),
-      ],
     );
   }
 }

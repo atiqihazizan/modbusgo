@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../../core/app_export.dart';
-import '../../core/services/device_identity_service.dart';
+import '../../core/constants/tracking_publish_config.dart';
 import '../../core/services/location_service.dart';
-import '../../core/services/mqtt_service.dart';
 import '../../core/services/provisioning_service.dart';
+import '../../core/services/publish_service.dart';
 import '../../core/services/registration_service.dart';
+import '../../core/services/tracking_bootstrap_service.dart';
 
 class ProvisionScreen extends StatefulWidget {
   const ProvisionScreen({super.key});
@@ -16,6 +17,15 @@ class ProvisionScreen extends StatefulWidget {
 
 class _ProvisionScreenState extends State<ProvisionScreen> {
   bool _isProcessing = false;
+  String _statusMessage = '';
+
+  void _setStatus(String message, {required bool processing}) {
+    if (!mounted) return;
+    setState(() {
+      _statusMessage = message;
+      _isProcessing = processing;
+    });
+  }
 
   String _mapProvisionError(ProvisionError error) {
     switch (error) {
@@ -45,32 +55,36 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
     if (scanned == null || scanned.isEmpty) return;
     if (!mounted) return;
 
-    setState(() => _isProcessing = true);
+    _setStatus('Verifying QR code…', processing: true);
 
     final result = await ProvisioningService().provisionFromScan(scanned);
 
     if (!mounted) return;
 
     if (!result.success) {
-      setState(() => _isProcessing = false);
+      _setStatus('', processing: false);
       final msg = _mapProvisionError(result.error ?? ProvisionError.unknown);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       return;
     }
 
+    _setStatus('', processing: false);
     final deviceName = await _showDeviceNameDialog();
     if (!mounted) return;
 
     if (deviceName == null || deviceName.trim().isEmpty) {
-      setState(() => _isProcessing = false);
       return;
     }
 
+    _setStatus('Getting GPS location…', processing: true);
+
     // WAJIB: dapatkan GPS fix sebelum daftar. Gagal = batal provisioning.
-    final fix = await LocationService().getCurrentFix();
+    final fix = await LocationService().getCurrentFix(
+      timeout: TrackingPublishConfig.locationTimeoutSnapshot,
+    );
     if (fix == null) {
       if (!mounted) return;
-      setState(() => _isProcessing = false);
+      _setStatus('', processing: false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -82,49 +96,34 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
       return;
     }
 
+    _setStatus('Registering device…', processing: true);
+
     final regResult = await RegistrationService().registerDevice(
       name: deviceName.trim(),
     );
     if (!mounted) return;
 
-    setState(() => _isProcessing = false);
-
-    if (regResult.success) {
-      await _emitInitialLocation(fix);
-      if (regResult.needApproval) {
-        context.go(AppRoutes.pendingScreen);
-      } else {
-        context.go(AppRoutes.homeScreen);
-      }
-    } else {
+    if (!regResult.success) {
+      _setStatus('', processing: false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Device registration failed. Please try again.'),
         ),
       );
+      return;
     }
-  }
 
-  /// Send one real lat/lon bundle after successful provisioning.
-  Future<void> _emitInitialLocation(LocationFix fix) async {
-    try {
-      final mqtt = MqttService();
-      if (!mqtt.isConnected) {
-        final deviceId = await DeviceIdentityService().getDeviceId();
-        if (deviceId.isEmpty) return;
-        await mqtt.init(deviceId: deviceId);
-        await Future.delayed(const Duration(seconds: 2));
-      }
-      mqtt.publishBundle({
-        'data_type': 'MG',
-        'latitude': fix.latitude,
-        'longitude': fix.longitude,
-        'speed': fix.speed,
-        if (fix.heading != null) 'heading': fix.heading,
-        'sensor_data': [-1],
-      });
-    } catch (_) {
-      // Silent — do not block flow.
+    _setStatus('Starting tracking…', processing: true);
+
+    await TrackingBootstrapService().startIfRegistered();
+    await PublishService().publishCurrentSnapshot(fix: fix);
+
+    if (!mounted) return;
+
+    if (regResult.needApproval) {
+      context.go(AppRoutes.pendingScreen);
+    } else {
+      context.go(AppRoutes.homeScreen);
     }
   }
 
@@ -216,10 +215,13 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            'Processing…',
+                            _statusMessage.isNotEmpty
+                                ? _statusMessage
+                                : 'Processing…',
                             style: theme.textTheme.bodyMedium?.copyWith(
                               color: theme.colorScheme.onSurfaceVariant,
                             ),
+                            textAlign: TextAlign.center,
                           ),
                         ],
                       )
