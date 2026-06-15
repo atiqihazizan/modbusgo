@@ -51,3 +51,4 @@ android/app/.cxx
 backup/
 *.bak
 
+.tmp.driveupload/
