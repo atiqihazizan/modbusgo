@@ -1,10 +1,20 @@
 import 'package:flutter/material.dart';
 
 import '../../core/app_export.dart';
+import '../../core/services/local_storage_service.dart';
 import '../home_screen/widgets/lora_webview_widget.dart';
 
 class MapViewScreen extends StatelessWidget {
   const MapViewScreen({super.key});
+
+  Future<String> _buildUrl() async {
+    final info = await LocalStorageService().getDeviceInfo();
+    final deviceId = info?['device_id'];
+    if (deviceId == null || deviceId.isEmpty) {
+      return LoraWebViewWidget.defaultUrl;
+    }
+    return '${LoraWebViewWidget.defaultUrl}?device=$deviceId';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -33,9 +43,22 @@ class MapViewScreen extends StatelessWidget {
           ),
         ),
       ),
-      body: const SafeArea(
-        top: false,
-        child: LoraWebViewWidget(fullScreen: true),
+      body: FutureBuilder<String>(
+        future: _buildUrl(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return Center(
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                color: theme.colorScheme.primary,
+              ),
+            );
+          }
+          return SafeArea(
+            top: false,
+            child: LoraWebViewWidget(url: snapshot.data!, fullScreen: true),
+          );
+        },
       ),
     );
   }
